@@ -124,7 +124,6 @@ def _normalize_domain(target):
 def run_nuclei(target, severity="low,medium,high,critical"):
     """Run nuclei vulnerability scanner against a target URL."""
     url = _normalize_url(target)
-    _tool_call("run_nuclei", target=url, severity=severity)
     nuclei_path = shutil.which("nuclei")
     if not nuclei_path:
         _tool_result("nuclei not installed", "error")
@@ -173,7 +172,6 @@ def run_nuclei(target, severity="low,medium,high,critical"):
 def run_nmap(target, scan_type="-sV --top-ports 100"):
     """Run nmap port scanner against a target."""
     domain = _normalize_domain(target)
-    _tool_call("run_nmap", target=domain, scan_type=scan_type)
     nmap_path = shutil.which("nmap")
     if not nmap_path:
         _tool_result("nmap not installed", "error")
@@ -216,7 +214,6 @@ def run_nmap(target, scan_type="-sV --top-ports 100"):
 def run_subfinder(domain):
     """Find subdomains for a domain."""
     domain = _normalize_domain(domain)
-    _tool_call("run_subfinder", domain=domain)
     subfinder_path = shutil.which("subfinder")
     if not subfinder_path:
         _tool_result("subfinder not installed", "error")
@@ -244,7 +241,6 @@ def run_subfinder(domain):
 def run_httpx(target):
     """Probe HTTP services and detect technologies."""
     url = _normalize_url(target)
-    _tool_call("run_httpx", target=url)
     # Find ProjectDiscovery httpx (not Python httpx library)
     httpx_path = shutil.which("httpx")
     if httpx_path:
@@ -340,7 +336,6 @@ def run_curl(url, method="GET", headers=""):
     """Send an HTTP request to verify findings."""
     if not url.startswith("http"):
         url = _normalize_url(url)
-    _tool_call("run_curl", method=method, url=url)
     curl_path = shutil.which("curl") or shutil.which("curl.exe")
     if not curl_path:
         _tool_result("curl not installed", "error")
