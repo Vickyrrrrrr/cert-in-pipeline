@@ -20,10 +20,18 @@ Usage:
 import json
 import os
 import sys
+import signal
 from pathlib import Path
 
 # Disable OpenAI Agents SDK tracing BEFORE any imports
 os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
+
+# Handle Ctrl+C forcefully
+def _force_exit(signum, frame):
+    print("\n\nForce exit.", flush=True)
+    os._exit(1)
+
+signal.signal(signal.SIGINT, _force_exit)
 
 import click
 import yaml

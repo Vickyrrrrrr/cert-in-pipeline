@@ -284,6 +284,14 @@ Then STOP. Do not call any more tools after writing the report.
         print(f"{GREEN}Session:{RESET} {summary['session_file']}", flush=True)
         return {"status": "completed", "report": None, "session": summary}
 
+    except KeyboardInterrupt:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1)
+        session.log("agent_interrupted", {"reason": "user_cancelled"})
+        print(f"\n\n{YELLOW}{BOLD}Agent stopped by user (Ctrl+C){RESET}", flush=True)
+        print(f"{GREEN}Session saved:{RESET} {session.session_file}", flush=True)
+        return {"status": "interrupted", "session": session.summary()}
+
     except Exception as e:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=1)
