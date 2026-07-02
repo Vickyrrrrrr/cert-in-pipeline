@@ -645,6 +645,10 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     # Parse JSON from agent text output
     recon_out = _parse_output(recon_out, ReconOutput)
     enum_out = _parse_output(enum_out, EnumOutput)
+    if not recon_out and recon_result[0]:
+        print(f"  {DIM}  debug: recon output was {len(str(recon_result[0]))} chars, first 200: {str(recon_result[0])[:200]}{RESET}", flush=True)
+    if not enum_out and enum_result[0]:
+        print(f"  {DIM}  debug: enum output was {len(str(enum_result[0]))} chars, first 200: {str(enum_result[0])[:200]}{RESET}", flush=True)
 
     _phase_done("recon", recon_time, _recon_summary(recon_out))
     _phase_done("enum", enum_time, _enum_summary(enum_out))
