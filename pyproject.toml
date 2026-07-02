@@ -17,5 +17,5 @@ dependencies = [
 [project.scripts]
 cert-in-pipeline = "pipeline:cli"
 
-[tool.uv]
-dev-dependencies = []
+[dependency-groups]
+dev = []

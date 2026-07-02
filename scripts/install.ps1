@@ -1,121 +1,123 @@
-# CERT-In Pipeline — Windows Installer (PowerShell + uv)
-# Installs: uv, Python deps, Go, nuclei, subfinder, httpx, ffuf, nmap, sqlmap
+﻿# CERT-In Pipeline - Windows Installer (pre-compiled binaries, no Go needed)
 # Usage: .\scripts\install.ps1
 
 $ErrorActionPreference = "Stop"
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  CERT-In Pipeline — Installer (Windows)" -ForegroundColor Cyan
+Write-Host "  CERT-In Pipeline - Installer (Windows)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-# ─── 1. Install uv ─────────────────────────────────────────────
-Write-Host "`n[1/8] Installing uv (Python package manager)..." -ForegroundColor Cyan
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-} else {
-    Write-Host "  uv already installed — skipping" -ForegroundColor Green
+$binDir = Join-Path $env:USERPROFILE 'bin'
+if (-not (Test-Path $binDir)) {
+    New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 }
 
-# ─── 2. Install Python dependencies ────────────────────────────
-Write-Host "`n[2/8] Installing Python dependencies..." -ForegroundColor Cyan
-uv sync
-Write-Host "  Python deps installed" -ForegroundColor Green
-
-# ─── 3. Install Go ─────────────────────────────────────────────
-Write-Host "`n[3/8] Installing Go..." -ForegroundColor Cyan
-if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
-    winget install GoLang.Go --accept-package-agreements --accept-source-agreements 2>$null
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-} else {
-    Write-Host "  Go already installed — skipping" -ForegroundColor Green
+function Refresh-Path {
+    $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = $machinePath + ';' + $userPath + ';' + $binDir
 }
 
-# ─── 4. Install nmap ───────────────────────────────────────────
-Write-Host "`n[4/8] Installing Nmap..." -ForegroundColor Cyan
-if (-not (Get-Command nmap -ErrorAction SilentlyContinue)) {
-    winget install Insecure.Nmap --accept-package-agreements --accept-source-agreements 2>$null
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-} else {
-    Write-Host "  Nmap already installed — skipping" -ForegroundColor Green
-}
-
-# ─── 5. Install nuclei ─────────────────────────────────────────
-Write-Host "`n[5/8] Installing nuclei..." -ForegroundColor Cyan
-if (-not (Get-Command nuclei -ErrorAction SilentlyContinue)) {
-    go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest 2>$null
-} else {
-    Write-Host "  nuclei already installed — skipping" -ForegroundColor Green
-}
-
-# ─── 6. Install subfinder ──────────────────────────────────────
-Write-Host "`n[6/8] Installing subfinder..." -ForegroundColor Cyan
-if (-not (Get-Command subfinder -ErrorAction SilentlyContinue)) {
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest 2>$null
-} else {
-    Write-Host "  subfinder already installed — skipping" -ForegroundColor Green
-}
-
-# ─── 7. Install httpx + ffuf ───────────────────────────────────
-Write-Host "`n[7/8] Installing httpx + ffuf..." -ForegroundColor Cyan
-if (-not (Get-Command httpx -ErrorAction SilentlyContinue)) {
-    go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest 2>$null
-} else {
-    Write-Host "  httpx already installed — skipping" -ForegroundColor Green
-}
-if (-not (Get-Command ffuf -ErrorAction SilentlyContinue)) {
-    go install -v github.com/ffuf/ffuf/v2@latest 2>$null
-} else {
-    Write-Host "  ffuf already installed — skipping" -ForegroundColor Green
-}
-
-# ─── 8. Install sqlmap + nuclei templates ──────────────────────
-Write-Host "`n[8/8] Installing sqlmap + nuclei templates..." -ForegroundColor Cyan
-uv pip install sqlmap 2>$null
-if (Get-Command nuclei -ErrorAction SilentlyContinue) {
-    nuclei -update-templates 2>$null
-    Write-Host "  Nuclei templates updated" -ForegroundColor Green
-}
-
-# ─── Add Go bin to PATH ────────────────────────────────────────
-$goBin = "$env:USERPROFILE\go\bin"
-if (($env:Path -split ";") -notcontains $goBin) {
-    [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$goBin", "User")
-    $env:Path += ";$goBin"
-}
-
-# ─── Summary ───────────────────────────────────────────────────
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  Installation Complete" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Cyan
-
-Write-Host "`nInstalled tools:" -ForegroundColor Yellow
-$tools = @{
-    "uv"      = "uv"
-    "python"  = "python"
-    "go"      = "go"
-    "nmap"    = "nmap"
-    "nuclei"  = "nuclei"
-    "subfinder" = "subfinder"
-    "httpx"   = "httpx"
-    "ffuf"    = "ffuf"
-    "sqlmap"  = "sqlmap"
-}
-
-foreach ($name in $tools.Keys | Sort-Object) {
-    $cmd = $tools[$name]
-    $found = Get-Command $cmd -ErrorAction SilentlyContinue
-    if ($found) {
-        Write-Host "  [OK] $name" -ForegroundColor Green
-    } else {
-        Write-Host "  [MISSING] $name" -ForegroundColor Red
+function Download-Tool($repo, $name, $pattern) {
+    $exePath = Join-Path $binDir ($name + '.exe')
+    if (Test-Path $exePath) {
+        Write-Host "  $name already installed" -ForegroundColor Green
+        return
+    }
+    Write-Host "  Fetching latest $name..." -ForegroundColor Yellow
+    $apiUrl = 'https://api.github.com/repos/' + $repo + '/releases/latest'
+    $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent' = 'cert-in-pipeline' } -TimeoutSec 30
+    $asset = $release.assets | Where-Object { $_.name -match $pattern } | Select-Object -First 1
+    if (-not $asset) {
+        Write-Host "  Could not find $name binary for Windows" -ForegroundColor Red
+        return
+    }
+    Write-Host "  Downloading $name..." -ForegroundColor Yellow
+    $zipPath = Join-Path $env:TEMP ($name + '.zip')
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing -TimeoutSec 120
+    Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+    Remove-Item $zipPath -Force
+    if (Test-Path $exePath) {
+        Write-Host "  [OK] $name installed" -ForegroundColor Green
     }
 }
 
-Write-Host "`nNext steps:" -ForegroundColor Yellow
-Write-Host "  1. Restart your terminal (to pick up new PATH entries)"
-Write-Host "  2. Set your API key:"
-Write-Host "     `$env:GLM_API_KEY = 'your-key'" -ForegroundColor White
-Write-Host "  3. Run benchmark:"
-Write-Host "     uv run pipeline.py benchmark --provider glm --model glm-5.2" -ForegroundColor White
-Write-Host "  4. Run live scan:"
-Write-Host "     uv run pipeline.py live --target example.com --provider glm --model glm-5.2" -ForegroundColor White
+# 1. Install uv
+Write-Host ""
+Write-Host "[1/5] Installing uv..." -ForegroundColor Cyan
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    Refresh-Path
+} else {
+    Write-Host "  uv already installed" -ForegroundColor Green
+}
+
+# 2. Install Python dependencies
+Write-Host ""
+Write-Host "[2/5] Installing Python dependencies..." -ForegroundColor Cyan
+uv sync
+Write-Host "  Done" -ForegroundColor Green
+
+# 3. Install nmap
+Write-Host ""
+Write-Host "[3/5] Installing Nmap..." -ForegroundColor Cyan
+if (-not (Get-Command nmap -ErrorAction SilentlyContinue)) {
+    winget install Insecure.Nmap --accept-package-agreements --accept-source-agreements 2>$null
+    Refresh-Path
+} else {
+    Write-Host "  Nmap already installed" -ForegroundColor Green
+}
+
+# 4. Download pre-compiled security tools (fast - no Go compilation needed)
+Write-Host ""
+Write-Host "[4/5] Downloading nuclei, subfinder, httpx, ffuf..." -ForegroundColor Cyan
+Download-Tool 'projectdiscovery/nuclei' 'nuclei' 'windows_amd64'
+Download-Tool 'projectdiscovery/subfinder' 'subfinder' 'windows_amd64'
+Download-Tool 'projectdiscovery/httpx' 'httpx' 'windows_amd64'
+Download-Tool 'ffuf/ffuf' 'ffuf' 'windows_amd64'
+
+# Add bin dir to PATH
+if (($env:Path -split ';') -notcontains $binDir) {
+    $currentPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    [Environment]::SetEnvironmentVariable('Path', $currentPath + ';' + $binDir, 'User')
+    $env:Path = $env:Path + ';' + $binDir
+}
+
+# 5. Update nuclei templates + install sqlmap
+Write-Host ""
+Write-Host "[5/5] Updating nuclei templates + installing sqlmap..." -ForegroundColor Cyan
+$nucleiExe = Join-Path $binDir 'nuclei.exe'
+if (Test-Path $nucleiExe) {
+    & $nucleiExe -update-templates 2>$null
+    Write-Host "  Nuclei templates updated" -ForegroundColor Green
+}
+uv pip install sqlmap --system 2>$null
+Write-Host "  sqlmap installed" -ForegroundColor Green
+
+# Summary
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  Installation Complete" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+
+Write-Host ""
+Write-Host "Installed tools:" -ForegroundColor Yellow
+$checkTools = @('uv', 'nmap', 'nuclei', 'subfinder', 'httpx', 'ffuf')
+foreach ($t in $checkTools) {
+    $found = Get-Command $t -ErrorAction SilentlyContinue
+    if ($found) {
+        Write-Host "  [OK] $t" -ForegroundColor Green
+    } else {
+        $exePath = Join-Path $binDir ($t + '.exe')
+        if (Test-Path $exePath) {
+            Write-Host "  [OK] $t (in ~/bin)" -ForegroundColor Green
+        } else {
+            Write-Host "  [MISSING] $t" -ForegroundColor Red
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "Next steps:" -ForegroundColor Yellow
+Write-Host "  1. Restart your terminal"
+Write-Host '  2. $env:GLM_API_KEY = "your-key"'
+Write-Host '  3. uv run pipeline.py live --target example.com --provider glm --model glm-5.2'
