@@ -46,6 +46,9 @@ from llm.interface import supports_structured_output
 
 set_tracing_disabled(True)
 
+# Local print lock for spinner (don't import from tools — avoid circular deps)
+_print_lock = threading.Lock()
+
 # ─── Aesthetic constants ───────────────────────────────────────────
 # Minimal palette — 4 colors only
 DIM = "\033[2m"
@@ -581,9 +584,13 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     recon_prompt = f"Perform reconnaissance on: {target}\nStore all raw output with store_evidence(). Output ReconOutput."
     enum_prompt = f"Perform enumeration on: {target}\nStore all raw output with store_evidence(). Output EnumOutput."
 
-    recon_result, enum_result = await asyncio.gather(
-        _run_phase(recon_agent, recon_prompt, max_turns=25, label="recon scanning"),
-        _run_phase(enum_agent, enum_prompt, max_turns=25, label="enum scanning"),
+    # Run with single combined spinner (not per-agent spinners — they conflict)
+    (recon_result, enum_result), phase1_time, _ = await _run_parallel(
+        [
+            (recon_agent, recon_prompt, 25, "recon"),
+            (enum_agent, enum_prompt, 25, "enum"),
+        ],
+        phase_label="recon + enum scanning",
     )
 
     recon_out, recon_time = recon_result
