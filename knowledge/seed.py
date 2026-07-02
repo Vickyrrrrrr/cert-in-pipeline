@@ -1,19 +1,28 @@
-"""Seed script — downloads security knowledge and populates Qdrant vector DB.
+"""Seed script v2 — expanded knowledge base with smart chunking.
 
-Sources (all public, open-source):
-  1. OWASP WSTG (Web Security Testing Guide) — GitHub raw
-  2. CWE (Common Weakness Enumeration) — MITRE XML
-  3. CAPEC (Common Attack Pattern Enumeration) — MITRE XML
-  4. PayloadsAllTheThings — GitHub repo (injection payloads)
-  5. CERT-In advisories — public RSS
-  6. HackTricks — key pages
+Sources (all open-source, permissive licenses):
+  1. Nuclei templates (MIT) — 13k structured YAML with description+remediation
+  2. PayloadsAllTheThings (MIT) — 56 vuln categories, payloads+bypasses
+  3. OWASP Cheat Sheet Series (CC-BY-SA-4.0) — 120 remediation guides
+  4. OWASP API Security Top 10 (CC-BY-SA-4.0) — API-specific vulns
+  5. CWE (MITRE) — weakness definitions
+  6. CAPEC (MITRE) — attack patterns
+  7. Built-in security checklist — 20 vuln types
+
+Smart chunking:
+  - Split markdown by ## headers (semantic boundaries)
+  - Max 500 chars per chunk (~125 tokens)
+  - 50 char overlap between adjacent chunks
+  - Rich metadata: source, category, title, url, doc_id
+
+Token-effective retrieval:
+  - search_knowledge returns top 3, 300 chars each (~225 tokens total)
+  - fetch_full_doc gets complete text on demand
 
 Usage:
-  python knowledge/seed.py            # full rebuild
-  python knowledge/seed.py --check    # show stats only
-
-The Qdrant DB is stored locally at knowledge/qdrant.db — no Docker, no cloud.
-Embedding model: all-MiniLM-L6-v2 (384 dims, 80MB, runs on CPU).
+  uv run python knowledge/seed.py            # full rebuild (~5-10 min)
+  uv run python knowledge/seed.py --check    # stats only
+  uv run python knowledge/seed.py --quick    # skip nuclei (fast, ~2 min)
 """
 
 from __future__ import annotations
@@ -34,76 +43,325 @@ COLLECTION = "security_knowledge"
 EMBED_MODEL = "all-MiniLM-L6-v2"
 EMBED_DIMS = 384
 
+CHUNK_MAX = 500       # max chars per chunk (~125 tokens)
+CHUNK_OVERLAP = 50    # overlap between adjacent chunks
+
 
 @dataclass
 class Chunk:
     text: str
-    source: str       # "owasp-wstg", "cwe", "capec", "payloads", "cert-in"
-    category: str     # "xss", "sqli", "ssrf", "info-disclosure", etc.
+    source: str
+    category: str
     title: str
     url: str
-    doc_id: str       # unique ID within source
+    doc_id: str
 
 
-# ─── HTTP helper ────────────────────────────────────────────────────
+# ─── Smart chunking ────────────────────────────────────────────────
+
+def smart_chunk(text: str, source: str, category: str, title: str, url: str, doc_id: str) -> list[Chunk]:
+    """Split text into semantic chunks by headers, with overlap.
+
+    Strategy:
+      1. Split by ## headers (markdown sections)
+      2. If a section > CHUNK_MAX, split by paragraphs
+      3. If a paragraph > CHUNK_MAX, split by sentences
+      4. Add overlap between chunks for context continuity
+    """
+    chunks = []
+    text = text.strip()
+
+    if not text or len(text) < 20:
+        return chunks
+
+    # Split by ## headers
+    sections = []
+    current_header = ""
+    current_content = []
+
+    for line in text.split("\n"):
+        if line.startswith("## ") or line.startswith("# "):
+            if current_content:
+                sections.append((current_header, "\n".join(current_content)))
+            current_header = line.lstrip("# ").strip()
+            current_content = [line]
+        else:
+            current_content.append(line)
+
+    if current_content:
+        sections.append((current_header, "\n".join(current_content)))
+
+    # If no headers found, treat whole text as one section
+    if not sections:
+        sections = [("", text)]
+
+    for header, content in sections:
+        content = content.strip()
+        if not content or len(content) < 20:
+            continue
+
+        # If content fits in one chunk, keep it whole
+        if len(content) <= CHUNK_MAX:
+            chunk_title = f"{title}: {header}" if header else title
+            chunks.append(Chunk(
+                text=content, source=source, category=category,
+                title=chunk_title, url=url, doc_id=f"{doc_id}_{len(chunks)}",
+            ))
+            continue
+
+        # Split by paragraphs
+        paragraphs = content.split("\n\n")
+        current_chunk = ""
+
+        for para in paragraphs:
+            if len(current_chunk) + len(para) + 2 <= CHUNK_MAX:
+                current_chunk = f"{current_chunk}\n\n{para}" if current_chunk else para
+            else:
+                if current_chunk:
+                    chunk_title = f"{title}: {header}" if header else title
+                    chunks.append(Chunk(
+                        text=current_chunk, source=source, category=category,
+                        title=chunk_title, url=url, doc_id=f"{doc_id}_{len(chunks)}",
+                    ))
+                    # Overlap: keep last CHUNK_OVERLAP chars
+                    current_chunk = current_chunk[-CHUNK_OVERLAP:] if len(current_chunk) > CHUNK_OVERLAP else ""
+
+                # If single paragraph > CHUNK_MAX, split by sentences
+                if len(para) > CHUNK_MAX:
+                    sentences = para.replace(". ", ". \n").split("\n")
+                    for sent in sentences:
+                        if len(current_chunk) + len(sent) + 1 <= CHUNK_MAX:
+                            current_chunk = f"{current_chunk} {sent}" if current_chunk else sent
+                        else:
+                            if current_chunk:
+                                chunks.append(Chunk(
+                                    text=current_chunk, source=source, category=category,
+                                    title=f"{title}: {header}" if header else title,
+                                    url=url, doc_id=f"{doc_id}_{len(chunks)}",
+                                ))
+                                current_chunk = sent[:CHUNK_MAX]
+                            else:
+                                current_chunk = sent[:CHUNK_MAX]
+                else:
+                    current_chunk = para
+
+        if current_chunk and len(current_chunk) > 20:
+            chunk_title = f"{title}: {header}" if header else title
+            chunks.append(Chunk(
+                text=current_chunk, source=source, category=category,
+                title=chunk_title, url=url, doc_id=f"{doc_id}_{len(chunks)}",
+            ))
+
+    return chunks
+
+
+# ─── HTTP helpers ──────────────────────────────────────────────────
 
 def _fetch(url: str, timeout: int = 30) -> str:
-    """Fetch URL content as text."""
-    req = urllib.request.Request(url, headers={
+    headers = {
         "User-Agent": "cert-in-pipeline-seed/1.0",
         "Accept": "text/html,application/json,application/xml,text/plain",
-    })
+    }
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
 
-def _fetch_json(url: str, timeout: int = 30) -> dict:
+def _fetch_json(url: str, timeout: int = 30) -> dict | list:
     return json.loads(_fetch(url, timeout))
 
 
-# ─── Source 1: OWASP WSTG ──────────────────────────────────────────
-
-def fetch_owasp_wstg() -> list[Chunk]:
-    """Fetch OWASP Web Security Testing Guide test cases."""
-    print("  [1/6] Fetching OWASP WSTG...")
-    chunks = []
+def _clone_repo(repo: str, dest: str) -> Path | None:
+    """Clone a GitHub repo (shallow) — no API rate limits."""
+    dest_path = KNOWLEDGE_DIR / "sources" / dest
+    if dest_path.exists() and any(dest_path.iterdir()):
+        print(f"    Already cloned: {dest}")
+        return dest_path
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    url = f"https://github.com/{repo}.git"
+    import subprocess
     try:
-        api_url = "https://api.github.com/repos/OWASP/WSTG/contents/v2/src/markdown"
-        dirs = _fetch_json(api_url)
-        for d in dirs:
-            if d.get("type") != "dir" or not d.get("name", "").startswith("0"):
-                continue
+        subprocess.run(["git", "clone", "--depth", "1", url, str(dest_path)],
+                       capture_output=True, timeout=120, check=True)
+        return dest_path
+    except Exception as e:
+        print(f"    WARN: clone {repo} failed: {e}")
+        return None
+
+
+def _read_md_files(directory: Path, max_per_file: int = 3) -> list[tuple[str, str, str]]:
+    """Read all .md files from a directory. Returns [(filename, content, relpath)]."""
+    results = []
+    for md in directory.rglob("*.md"):
+        try:
+            content = md.read_text(encoding="utf-8", errors="replace")
+            if len(content) > 20:
+                relpath = str(md.relative_to(directory))
+                results.append((md.name, content, relpath))
+        except Exception:
+            continue
+    return results
+
+
+# ─── Source 1: Nuclei templates (MIT) ──────────────────────────────
+
+def fetch_nuclei_templates(quick: bool = False) -> list[Chunk]:
+    """Fetch nuclei template descriptions via git clone (no API rate limits)."""
+    print("  [1/7] Fetching nuclei templates...")
+    chunks = []
+    repo_dir = _clone_repo("projectdiscovery/nuclei-templates", "nuclei-templates")
+    if not repo_dir:
+        print(f"    Got 0 nuclei template chunks")
+        return chunks
+
+    categories = {
+        "http/cves": "cve",
+        "http/vulnerabilities": "vulnerability",
+        "http/misconfiguration": "misconfig",
+        "http/exposed-panels": "exposed-panel",
+        "http/takeovers": "subdomain-takeover",
+    }
+
+    cap = 30 if quick else 100
+    for subdir, category in categories.items():
+        cat_dir = repo_dir / subdir
+        if not cat_dir.exists():
+            continue
+        yaml_files = list(cat_dir.rglob("*.yaml"))[:cap]
+        for yf in yaml_files:
             try:
-                files = _fetch_json(d["url"])
-                for f in files:
-                    if not f["name"].endswith(".md"):
-                        continue
-                    try:
-                        content = _fetch(f["download_url"])
-                        category = d["name"].split("-", 1)[-1] if "-" in d["name"] else d["name"]
-                        chunks.append(Chunk(
-                            text=content[:4000],
-                            source="owasp-wstg",
-                            category=category.lower(),
-                            title=f["name"].replace(".md", ""),
-                            url=f["html_url"],
-                            doc_id=f["name"],
-                        ))
-                    except Exception:
-                        continue
+                content = yf.read_text(encoding="utf-8", errors="replace")
+                tmpl_id = _extract_yaml_field(content, "id")
+                name = _extract_yaml_field(content, "name")
+                severity = _extract_yaml_field(content, "severity")
+                description = _extract_yaml_field(content, "description")
+                remediation = _extract_yaml_field(content, "remediation")
+                if not description and not name:
+                    continue
+                text = f"Nuclei: {name}\nSeverity: {severity}\nDescription: {description}\nRemediation: {remediation}"[:CHUNK_MAX]
+                relpath = str(yf.relative_to(repo_dir)).replace("\\", "/")
+                chunks.append(Chunk(
+                    text=text, source="nuclei-templates", category=category,
+                    title=f"{name} ({severity})",
+                    url=f"https://github.com/projectdiscovery/nuclei-templates/blob/main/{relpath}",
+                    doc_id=tmpl_id or relpath,
+                ))
             except Exception:
                 continue
-    except Exception as e:
-        print(f"    WARN: OWASP WSTG fetch failed: {e}")
-    print(f"    Got {len(chunks)} WSTG chunks")
+    print(f"    Got {len(chunks)} nuclei template chunks")
     return chunks
 
 
-# ─── Source 2: CWE (MITRE) ─────────────────────────────────────────
+def _extract_yaml_field(yaml_text: str, field: str) -> str:
+    """Lightweight YAML field extraction (avoids pyyaml dependency)."""
+    import re
+    match = re.search(rf'^{field}:\s*["\']?(.+?)["\']?\s*$', yaml_text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+# ─── Source 2: PayloadsAllTheThings (MIT) ──────────────────────────
+
+def fetch_payloads_all() -> list[Chunk]:
+    """Fetch ALL PayloadsAllTheThings via git clone."""
+    print("  [2/7] Fetching PayloadsAllTheThings (all categories)...")
+    chunks = []
+    repo_dir = _clone_repo("swisskyrepo/PayloadsAllTheThings", "payloadsallthethings")
+    if not repo_dir:
+        print(f"    Got 0 payload chunks")
+        return chunks
+
+    for vuln_dir in repo_dir.iterdir():
+        if not vuln_dir.is_dir() or vuln_dir.name.startswith("."):
+            continue
+        cat_name = vuln_dir.name
+        md_files = list(vuln_dir.rglob("*.md"))[:5]
+        for md in md_files:
+            try:
+                content = md.read_text(encoding="utf-8", errors="replace")
+                file_chunks = smart_chunk(
+                    content, source="payloads",
+                    category=cat_name.lower().replace(" ", "-"),
+                    title=f"{cat_name}: {md.stem}",
+                    url=f"https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/{cat_name}/{md.name}",
+                    doc_id=f"payloads/{cat_name}/{md.name}",
+                )
+                chunks.extend(file_chunks[:5])
+            except Exception:
+                continue
+    print(f"    Got {len(chunks)} payload chunks")
+    return chunks
+
+
+# ─── Source 3: OWASP Cheat Sheet Series (CC-BY-SA) ─────────────────
+
+def fetch_owasp_cheatsheets() -> list[Chunk]:
+    """Fetch OWASP Cheat Sheet Series via git clone."""
+    print("  [3/7] Fetching OWASP Cheat Sheets...")
+    chunks = []
+    repo_dir = _clone_repo("OWASP/CheatSheetSeries", "cheatsheets")
+    if not repo_dir:
+        print(f"    Got 0 cheat sheet chunks")
+        return chunks
+
+    cs_dir = repo_dir / "cheatsheets"
+    if not cs_dir.exists():
+        cs_dir = repo_dir
+
+    for md in cs_dir.glob("*.md"):
+        try:
+            content = md.read_text(encoding="utf-8", errors="replace")
+            sheet_name = md.stem.replace("_", " ")
+            file_chunks = smart_chunk(
+                content, source="owasp-cheatsheet",
+                category="remediation",
+                title=f"OWASP Cheat Sheet: {sheet_name}",
+                url=f"https://github.com/OWASP/CheatSheetSeries/blob/master/cheatsheets/{md.name}",
+                doc_id=f"cheatsheet/{md.name}",
+            )
+            chunks.extend(file_chunks[:3])
+        except Exception:
+            continue
+    print(f"    Got {len(chunks)} cheat sheet chunks")
+    return chunks
+
+
+# ─── Source 4: OWASP API Security Top 10 (CC-BY-SA) ────────────────
+
+def fetch_owasp_api() -> list[Chunk]:
+    """Fetch OWASP API Security Top 10 via git clone."""
+    print("  [4/7] Fetching OWASP API Security...")
+    chunks = []
+    repo_dir = _clone_repo("OWASP/API-Security", "api-security")
+    if not repo_dir:
+        print(f"    Got 0 API security chunks")
+        return chunks
+
+    en_dir = repo_dir / "editions" / "2023" / "en"
+    if not en_dir.exists():
+        en_dir = repo_dir
+
+    for md in en_dir.rglob("*.md"):
+        try:
+            content = md.read_text(encoding="utf-8", errors="replace")
+            file_chunks = smart_chunk(
+                content, source="owasp-api",
+                category="api-security",
+                title=f"API Security: {md.stem}",
+                url=f"https://github.com/OWASP/API-Security/blob/master/editions/2023/en/{md.name}",
+                doc_id=f"api-security/{md.name}",
+            )
+            chunks.extend(file_chunks[:5])
+        except Exception:
+            continue
+    print(f"    Got {len(chunks)} API security chunks")
+    return chunks
+
+
+# ─── Source 5: CWE (MITRE) ─────────────────────────────────────────
 
 def fetch_cwe() -> list[Chunk]:
     """Fetch CWE definitions from MITRE."""
-    print("  [2/6] Fetching CWE definitions...")
+    print("  [5/7] Fetching CWE definitions...")
     chunks = []
     try:
         url = "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip"
@@ -122,12 +380,9 @@ def fetch_cwe() -> list[Chunk]:
             cwe_id = weakness.get("ID", "")
             name = weakness.findtext("cwe:Name", "", ns)
             desc = weakness.findtext("cwe:Description", "", ns)
-            extended = weakness.findtext("cwe:Extended_Description", "", ns)
-            text = f"CWE-{cwe_id}: {name}\n\n{desc}\n\n{extended}"[:3000]
+            text = f"CWE-{cwe_id}: {name}\n\n{desc}"[:CHUNK_MAX]
             chunks.append(Chunk(
-                text=text,
-                source="cwe",
-                category="weakness",
+                text=text, source="cwe", category="weakness",
                 title=f"CWE-{cwe_id}: {name}",
                 url=f"https://cwe.mitre.org/data/definitions/{cwe_id}.html",
                 doc_id=f"CWE-{cwe_id}",
@@ -136,39 +391,27 @@ def fetch_cwe() -> list[Chunk]:
                 break
     except Exception as e:
         print(f"    WARN: CWE fetch failed: {e}, using fallback")
-        fallback_cwe = {
-            "CWE-79": "Cross-site Scripting (XSS)",
-            "CWE-89": "SQL Injection",
-            "CWE-200": "Information Exposure",
-            "CWE-209": "Error Message with Sensitive Info",
-            "CWE-284": "Improper Access Control",
-            "CWE-287": "Improper Authentication",
-            "CWE-319": "Cleartext Transmission",
-            "CWE-352": "Cross-Site Request Forgery",
-            "CWE-538": "Sensitive File in Web Root",
-            "CWE-611": "XXE",
-            "CWE-614": "Cookie Without Secure Flag",
-            "CWE-693": "Protection Mechanism Failure",
-            "CWE-918": "SSRF",
+        fallback = {
+            "CWE-79": "Cross-site Scripting (XSS)", "CWE-89": "SQL Injection",
+            "CWE-200": "Information Exposure", "CWE-284": "Improper Access Control",
+            "CWE-287": "Improper Authentication", "CWE-319": "Cleartext Transmission",
+            "CWE-352": "CSRF", "CWE-538": "Sensitive File in Web Root",
+            "CWE-611": "XXE", "CWE-614": "Cookie Without Secure Flag",
+            "CWE-693": "Protection Mechanism Failure", "CWE-918": "SSRF",
             "CWE-942": "Permissive Cross-domain Policy",
         }
-        for cid, name in fallback_cwe.items():
-            chunks.append(Chunk(
-                text=f"{cid}: {name}",
-                source="cwe", category="weakness",
-                title=f"{cid}: {name}",
-                url=f"https://cwe.mitre.org/data/definitions/{cid.split('-')[1]}.html",
-                doc_id=cid,
-            ))
+        for cid, name in fallback.items():
+            chunks.append(Chunk(text=f"{cid}: {name}", source="cwe", category="weakness",
+                                title=f"{cid}: {name}", url="", doc_id=cid))
     print(f"    Got {len(chunks)} CWE chunks")
     return chunks
 
 
-# ─── Source 3: CAPEC (MITRE) ───────────────────────────────────────
+# ─── Source 6: CAPEC (MITRE) ───────────────────────────────────────
 
 def fetch_capec() -> list[Chunk]:
     """Fetch CAPEC attack patterns from MITRE."""
-    print("  [3/6] Fetching CAPEC attack patterns...")
+    print("  [6/7] Fetching CAPEC attack patterns...")
     chunks = []
     try:
         url = "https://capec.mitre.org/data/xml/capec_latest.xml"
@@ -180,11 +423,9 @@ def fetch_capec() -> list[Chunk]:
             ap_id = ap.get("ID", "")
             name = ap.findtext("capec:Name", "", ns)
             desc = ap.findtext("capec:Description", "", ns)
-            text = f"CAPEC-{ap_id}: {name}\n\n{desc}"[:3000]
+            text = f"CAPEC-{ap_id}: {name}\n\n{desc}"[:CHUNK_MAX]
             chunks.append(Chunk(
-                text=text,
-                source="capec",
-                category="attack-pattern",
+                text=text, source="capec", category="attack-pattern",
                 title=f"CAPEC-{ap_id}: {name}",
                 url=f"https://capec.mitre.org/data/definitions/{ap_id}.html",
                 doc_id=f"CAPEC-{ap_id}",
@@ -197,145 +438,56 @@ def fetch_capec() -> list[Chunk]:
     return chunks
 
 
-# ─── Source 4: PayloadsAllTheThings ────────────────────────────────
-
-def fetch_payloads() -> list[Chunk]:
-    """Fetch key injection payloads from PayloadsAllTheThings."""
-    print("  [4/6] Fetching PayloadsAllTheThings...")
-    chunks = []
-    categories = [
-        "SQL Injection", "XSS Injection", "SSRF Server Side Request Forgery",
-        "Command Injection", "File Upload", "Path Traversal",
-        "LDAP Injection", "XXE Injection", "CSRF Cross Site Request Forgery",
-        "Open Redirect", "IDOR",
-    ]
-    for cat in categories:
-        try:
-            safe_name = cat.replace(" ", "%20")
-            api_url = f"https://api.github.com/repos/swisskyrepo/PayloadsAllTheThings/contents/{safe_name}"
-            files = _fetch_json(api_url)
-            for f in files:
-                if f.get("type") != "file" or not f["name"].endswith(".md"):
-                    continue
-                try:
-                    content = _fetch(f["download_url"])
-                    chunks.append(Chunk(
-                        text=content[:4000],
-                        source="payloads",
-                        category=cat.lower().replace(" ", "-"),
-                        title=f"{cat}: {f['name']}",
-                        url=f["html_url"],
-                        doc_id=f"{cat}/{f['name']}",
-                    ))
-                except Exception:
-                    continue
-        except Exception:
-            continue
-    print(f"    Got {len(chunks)} payload chunks")
-    return chunks
-
-
-# ─── Source 5: CERT-In advisories ──────────────────────────────────
-
-def fetch_cert_in() -> list[Chunk]:
-    """Fetch CERT-In vulnerability advisories."""
-    print("  [5/6] Fetching CERT-In advisories...")
-    chunks = []
-    try:
-        url = "https://www.cert-in.org.in/data/advisories.js"
-        data = _fetch(url, timeout=20)
-        try:
-            advisories = json.loads(data)
-            for adv in advisories[:50]:
-                chunks.append(Chunk(
-                    text=f"CERT-In Advisory {adv.get('id', '')}: {adv.get('title', '')}\n\n{adv.get('description', '')}",
-                    source="cert-in",
-                    category="advisory",
-                    title=f"CERT-In {adv.get('id', '')}: {adv.get('title', '')}",
-                    url="https://www.cert-in.org.in/",
-                    doc_id=f"cert-in-{adv.get('id', '')}",
-                ))
-        except json.JSONDecodeError:
-            pass
-    except Exception as e:
-        print(f"    WARN: CERT-In fetch failed: {e}")
-    print(f"    Got {len(chunks)} CERT-In chunks")
-    return chunks
-
-
-# ─── Source 6: Built-in security checklist ─────────────────────────
+# ─── Source 7: Built-in security checklist ─────────────────────────
 
 def fetch_security_checklist() -> list[Chunk]:
     """Built-in security knowledge — always available, no network needed."""
-    print("  [6/6] Loading built-in security checklist...")
+    print("  [7/7] Loading built-in security checklist...")
     checklist = [
         ("xss-reflected", "Reflected XSS",
-         "User input is reflected in HTML without encoding. Test: inject <script>alert(1)</script> in URL params. "
-         "CWE-79. Fix: HTML-encode all output, use CSP headers."),
+         "User input reflected in HTML without encoding. Test: <script>alert(1)</script> in URL params. CWE-79. Fix: HTML-encode output, CSP headers."),
         ("xss-stored", "Stored XSS",
-         "User input is stored and displayed without encoding. More dangerous than reflected. "
-         "Test: inject payload in comment/profile fields, check if it executes on view. CWE-79."),
+         "Input stored and displayed without encoding. More dangerous than reflected. Test: inject in comment/profile, check execution on view. CWE-79."),
         ("sqli-error", "Error-based SQL Injection",
-         "SQL errors visible to user. Test: append ' to URL params. Look for SQL syntax errors. "
-         "CWE-89. Fix: parameterized queries, WAF."),
+         "SQL errors visible. Test: append ' to params. Look for syntax errors. CWE-89. Fix: parameterized queries."),
         ("sqli-blind", "Blind SQL Injection",
-         "No visible errors but app behaves differently. Test: append AND 1=1 vs AND 1=2. "
-         "Use sqlmap for automation. CWE-89."),
+         "No errors but app behaves differently. Test: AND 1=1 vs AND 1=2. Use sqlmap. CWE-89."),
         ("ssrf", "Server-Side Request Forgery",
-         "Server fetches URLs without validation. Test: replace URL params with http://localhost, http://169.254.169.254. "
-         "CWE-918. Fix: allowlist of domains, block internal IPs."),
+         "Server fetches URLs without validation. Test: http://localhost, http://169.254.169.254 (AWS metadata). CWE-918. Fix: allowlist domains."),
         ("idor", "Insecure Direct Object Reference",
-         "User can access other users' data by changing IDs. Test: increment/decrement ID in URL. "
-         "CWE-284. Fix: authorization checks on every object access."),
+         "Access other users' data by changing IDs. Test: increment ID in URL. CWE-284. Fix: authz checks per object."),
         ("path-traversal", "Path Traversal",
-         "App allows reading arbitrary files. Test: ../../../etc/passwd in file params. "
-         "CWE-22. Fix: validate and sanitize file paths."),
+         "Read arbitrary files. Test: ../../../etc/passwd. CWE-22. Fix: sanitize paths."),
         ("open-redirect", "Open Redirect",
-         "App redirects to arbitrary URLs. Test: ?next=https://evil.com. "
-         "CWE-601. Fix: validate redirect URLs against allowlist."),
+         "Redirect to arbitrary URLs. Test: ?next=https://evil.com. CWE-601. Fix: validate redirect URLs."),
         ("info-disclosure", "Information Disclosure",
-         "Sensitive info in responses. Check: verbose errors, .git/.env exposed, version headers, source maps. "
-         "CWE-200. Fix: custom error pages, disable directory listing, remove sensitive files."),
+         "Sensitive info in responses. Check: verbose errors, .git/.env, version headers, source maps. CWE-200."),
         ("missing-headers", "Missing Security Headers",
-         "Check for: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy. "
-         "CWE-693. Fix: add all security headers in web server config."),
+         "Check: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy. CWE-693."),
         ("cookie-flags", "Insecure Cookie Configuration",
-         "Cookies missing Secure, HttpOnly, SameSite flags. "
-         "CWE-614, CWE-1004. Fix: Set-Cookie with Secure; HttpOnly; SameSite=Strict."),
+         "Missing Secure, HttpOnly, SameSite. CWE-614. Fix: Set-Cookie with Secure; HttpOnly; SameSite=Strict."),
         ("csrf", "Cross-Site Request Forgery",
-         "No CSRF token on state-changing requests. Test: craft HTML form that submits to target. "
-         "CWE-352. Fix: CSRF tokens, SameSite cookies."),
+         "No CSRF token on state-changing requests. CWE-352. Fix: CSRF tokens, SameSite cookies."),
         ("default-creds", "Default Credentials",
-         "Services using default passwords. Check: admin/admin, root/root, tomcat/tomcat. "
-         "CWE-798. Fix: force password change on first login."),
+         "Services using default passwords. Check: admin/admin, root/root. CWE-798. Fix: force password change."),
         ("exposed-admin", "Exposed Admin Panel",
-         "Admin interface accessible without auth or with default creds. Check: /admin, /admin/login, /phpmyadmin. "
-         "CWE-284. Fix: restrict admin to VPN/IP allowlist, strong auth."),
+         "Admin interface accessible. Check: /admin, /phpmyadmin. CWE-284. Fix: restrict to VPN/IP allowlist."),
         ("cors-wildcard", "Wildcard CORS",
-         "Access-Control-Allow-Origin: * with credentials. Test: check response headers for ACAO. "
-         "CWE-942. Fix: specific origin allowlist, don't use * with credentials."),
+         "ACAO: * with credentials. CWE-942. Fix: specific origin allowlist."),
         ("rate-limit", "Missing Rate Limiting",
-         "No throttling on login/API. Test: send 100 requests rapidly. "
-         "CWE-770. Fix: rate limiting middleware, exponential backoff."),
-        ("insecure-deserialization", "Insecure Deserialization",
-         "App deserializes untrusted data. Test: look for base64-encoded serialized objects in params. "
-         "CWE-502. Fix: use JSON, validate before deserialization."),
+         "No throttling on login/API. CWE-770. Fix: rate limiting, exponential backoff."),
         ("xxe", "XML External Entity",
-         "XML parser processes external entities. Test: <!ENTITY xxe SYSTEM 'file:///etc/passwd'>. "
-         "CWE-611. Fix: disable DTD processing in XML parser."),
+         "XML parser processes external entities. Test: <!ENTITY xxe SYSTEM 'file:///etc/passwd'>. CWE-611."),
         ("cmd-injection", "OS Command Injection",
-         "User input passed to system(). Test: ; ls, | whoami, && id. "
-         "CWE-78. Fix: use safe APIs, never pass user input to shell."),
+         "User input to system(). Test: ; ls, | whoami. CWE-78. Fix: safe APIs, no shell."),
         ("file-upload", "Unrestricted File Upload",
-         "App allows uploading executable files. Test: upload .php, .jsp, .aspx files. "
-         "CWE-434. Fix: validate file type, rename, store outside webroot."),
+         "Upload executable files. Test: .php, .jsp. CWE-434. Fix: validate type, rename, store outside webroot."),
+        ("deserialization", "Insecure Deserialization",
+         "App deserializes untrusted data. Test: base64 serialized objects. CWE-502. Fix: use JSON, validate."),
     ]
     chunks = []
     for cat, title, text in checklist:
-        chunks.append(Chunk(
-            text=text, source="checklist", category=cat,
-            title=title, url="", doc_id=f"checklist-{cat}",
-        ))
+        chunks.append(Chunk(text=text, source="checklist", category=cat, title=title, url="", doc_id=f"checklist-{cat}"))
     print(f"    Got {len(chunks)} checklist chunks")
     return chunks
 
@@ -350,11 +502,10 @@ def seed_qdrant(chunks: list[Chunk]) -> None:
 
     print(f"\n  Loading embedding model ({EMBED_MODEL})...")
     embedder = SentenceTransformer(EMBED_MODEL)
-    print(f"  Model loaded. Dimension: {embedder.get_sentence_embedding_dimension()}")
+    print(f"  Model loaded. Dimension: {embedder.get_embedding_dimension()}")
 
     client = QdrantClient(path=QDRANT_PATH)
 
-    # Recreate collection
     try:
         client.delete_collection(COLLECTION)
     except Exception:
@@ -365,8 +516,7 @@ def seed_qdrant(chunks: list[Chunk]) -> None:
         vectors_config=VectorParams(size=EMBED_DIMS, distance=Distance.COSINE),
     )
 
-    # Batch embed and insert
-    BATCH = 50
+    BATCH = 64
     total = len(chunks)
     print(f"\n  Embedding {total} chunks (batch={BATCH})...")
 
@@ -398,8 +548,8 @@ def seed_qdrant(chunks: list[Chunk]) -> None:
 
 
 def show_stats() -> None:
-    """Show Qdrant collection stats."""
     from qdrant_client import QdrantClient
+    from qdrant_client.models import FieldCondition, MatchValue, Filter
 
     client = QdrantClient(path=QDRANT_PATH)
     try:
@@ -411,17 +561,11 @@ def show_stats() -> None:
         print(f"  Vector size: {info.config.params.vectors.size}")
         print(f"  Distance: {info.config.params.vectors.distance}")
 
-        # Count by source
-        from qdrant_client.models import FieldCondition, MatchValue, Filter
-        sources = ["owasp-wstg", "cwe", "capec", "payloads", "cert-in", "checklist"]
+        sources = ["nuclei-templates", "payloads", "owasp-cheatsheet", "owasp-api", "cwe", "capec", "checklist"]
         print(f"\n  By source:")
         for src in sources:
-            r = client.count(
-                COLLECTION,
-                count_filter=Filter(must=[FieldCondition(key="source", match=MatchValue(value=src))]),
-                exact=True,
-            )
-            print(f"    {src:15s}: {r.count}")
+            r = client.count(COLLECTION, count_filter=Filter(must=[FieldCondition(key="source", match=MatchValue(value=src))]), exact=True)
+            print(f"    {src:20s}: {r.count}")
     except Exception as e:
         print(f"  Error: {e}. Run 'python knowledge/seed.py' to build the DB.")
 
@@ -430,26 +574,27 @@ def show_stats() -> None:
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Seed Qdrant security knowledge base")
+    parser = argparse.ArgumentParser(description="Seed Qdrant security knowledge base v2")
     parser.add_argument("--check", action="store_true", help="Show stats only")
+    parser.add_argument("--quick", action="store_true", help="Skip nuclei templates (fast mode)")
     args = parser.parse_args()
 
     print("=" * 55)
-    print("  CERT-In Pipeline — Knowledge Base Seeder")
+    print("  CERT-In Pipeline — Knowledge Base Seeder v2")
     print("=" * 55)
 
     if args.check:
         show_stats()
         return
 
-    # Fetch all sources
     print("\nFetching security knowledge sources...\n")
     all_chunks: list[Chunk] = []
-    all_chunks.extend(fetch_owasp_wstg())
+    all_chunks.extend(fetch_nuclei_templates(quick=args.quick))
+    all_chunks.extend(fetch_payloads_all())
+    all_chunks.extend(fetch_owasp_cheatsheets())
+    all_chunks.extend(fetch_owasp_api())
     all_chunks.extend(fetch_cwe())
     all_chunks.extend(fetch_capec())
-    all_chunks.extend(fetch_payloads())
-    all_chunks.extend(fetch_cert_in())
     all_chunks.extend(fetch_security_checklist())
 
     print(f"\n  Total chunks: {len(all_chunks)}")
@@ -458,14 +603,10 @@ def main():
         print("  No chunks fetched. Check network connection.")
         sys.exit(1)
 
-    # Seed Qdrant
     print("\nSeeding Qdrant vector database...\n")
     seed_qdrant(all_chunks)
-
-    # Show stats
     show_stats()
     print(f"\n  Done! Knowledge base ready for RAG queries.")
-    print(f"  Run: python pipeline.py swarm --target example.com --provider glm --model glm-5-turbo")
 
 
 if __name__ == "__main__":

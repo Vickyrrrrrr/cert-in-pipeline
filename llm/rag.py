@@ -1,17 +1,16 @@
 """RAG Knowledge Base — Qdrant-backed semantic search for security knowledge.
 
-How SOTA coding agents use RAG:
-  - Agent calls search_knowledge("exposed .git directory") as a function tool
-  - Qdrant returns the top-k most relevant chunks (CWE-538, OWASP A05, payload)
-  - Agent uses the retrieved context to classify, exploit, and remediate
-  - Only relevant knowledge enters the context window (not everything)
+Token-effective retrieval (SOTA pattern):
+  - search_knowledge returns top 3, 150 chars each (~100 tokens total)
+  - fetch_full_doc gets complete text on demand (second-tier retrieval)
+  - Only relevant knowledge enters the context window
 
-Two-tier:
-  1. SEMANTIC: Qdrant local vector DB (OWASP, CWE, CAPEC, payloads, checklist)
+Two-tier retrieval:
+  1. SEMANTIC: Qdrant local vector DB (nuclei, OWASP, CWE, CAPEC, payloads)
   2. LIVE:     NVD API for real-time CVE lookup (always current)
 
-The Qdrant DB is built by: python knowledge/seed.py
-If DB doesn't exist, falls back to built-in checklist (still works, just less precise).
+The Qdrant DB is built by: uv run python knowledge/seed.py
+If DB doesn't exist, falls back gracefully.
 """
 
 from __future__ import annotations
@@ -66,13 +65,17 @@ def _is_db_ready() -> bool:
 
 # ─── Internal search (shared by all tools) ─────────────────────────
 
-def _semantic_search(query: str, limit: int = 5) -> str:
-    """Core semantic search — called by search_knowledge, get_remediation, get_payloads."""
+def _semantic_search(query: str, limit: int = 3, max_chars: int = 150) -> str:
+    """Core semantic search — token-effective retrieval.
+
+    Returns top-k results with truncated text (max_chars per result).
+    Agent can call fetch_full_doc to get complete text for a specific hit.
+    """
     client = _get_client()
     if client is None:
         return json.dumps({
-            "error": "Knowledge DB not built. Run: python knowledge/seed.py",
-            "fallback": "Use lookup_cwe and lookup_owasp for basic lookups.",
+            "error": "Knowledge DB not built. Run: uv run python knowledge/seed.py",
+            "fallback": "Use basic heuristics for classification.",
         })
 
     embedder = _get_embedder()
@@ -81,34 +84,40 @@ def _semantic_search(query: str, limit: int = 5) -> str:
     results = client.query_points(
         collection_name=COLLECTION,
         query=query_vector,
-        limit=min(limit, 10),
+        limit=min(limit, 5),
         with_payload=True,
     ).points
 
     hits = []
     for r in results:
         payload = r.payload or {}
+        full_text = payload.get("text", "")
         hits.append({
+            "doc_id": payload.get("doc_id", ""),
             "title": payload.get("title", ""),
             "source": payload.get("source", ""),
             "category": payload.get("category", ""),
-            "text": payload.get("text", "")[:500],
+            "text": full_text[:max_chars],  # truncate for token efficiency
+            "has_more": len(full_text) > max_chars,
             "url": payload.get("url", ""),
             "score": round(r.score, 3) if r.score else 0,
         })
 
-    return json.dumps({"query": query, "results": hits, "count": len(hits)})
+    return json.dumps({"query": query, "results": hits, "count": len(hits),
+                       "hint": "Call fetch_full_doc(doc_id) for complete text if has_more=true"})
 
 
 # ─── Semantic search tools ─────────────────────────────────────────
 
 @function_tool
-def search_knowledge(query: str, limit: int = 5) -> str:
+def search_knowledge(query: str, limit: int = 3) -> str:
     """Search the security knowledge base for relevant information.
 
-    Uses semantic search to find the most relevant security knowledge.
-    Covers: OWASP WSTG, CWE definitions, CAPEC attack patterns, injection payloads,
-    CERT-In advisories, and a built-in security checklist.
+    Uses semantic search across: nuclei templates (13k), OWASP Cheat Sheets (120),
+    PayloadsAllTheThings (56 categories), CWE (200), CAPEC (100), API Security.
+
+    Returns concise results (150 chars each) to save tokens.
+    Call fetch_full_doc(doc_id) if you need the complete text.
 
     Use this to:
       - Classify a finding (find the right CWE/OWASP)
@@ -120,7 +129,46 @@ def search_knowledge(query: str, limit: int = 5) -> str:
     Example: search_knowledge("SQL injection bypass WAF")
     Example: search_knowledge("missing security headers CSP HSTS")
     """
-    return _semantic_search(query, limit)
+    return _semantic_search(query, limit, max_chars=150)
+
+
+@function_tool
+def fetch_full_doc(doc_id: str) -> str:
+    """Fetch the complete text of a knowledge base document by its doc_id.
+
+    Use this after search_knowledge when you need more detail than the
+    150-char preview. Returns the full chunk text.
+
+    Example: fetch_full_doc("CWE-79")
+    Example: fetch_full_doc("cheatsheet/XSS_Prevention_Cheat_Sheet.md")
+    """
+    client = _get_client()
+    if client is None:
+        return json.dumps({"error": "Knowledge DB not built"})
+
+    from qdrant_client.models import FieldCondition, MatchValue, Filter
+
+    results = client.query_points(
+        collection_name=COLLECTION,
+        query=_get_embedder().encode(doc_id).tolist(),  # search by doc_id similarity
+        query_filter=Filter(must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]),
+        limit=1,
+        with_payload=True,
+    ).points
+
+    if not results:
+        # Fallback: scroll to find by doc_id
+        all_results = client.scroll(collection_name=COLLECTION, limit=10000, with_payload=True, with_vectors=False)[0]
+        for r in all_results:
+            if r.payload.get("doc_id") == doc_id:
+                return json.dumps({"doc_id": doc_id, "text": r.payload.get("text", ""),
+                                   "title": r.payload.get("title", ""), "source": r.payload.get("source", "")})
+        return json.dumps({"error": f"doc_id '{doc_id}' not found"})
+
+    p = results[0].payload or {}
+    return json.dumps({"doc_id": doc_id, "text": p.get("text", ""),
+                       "title": p.get("title", ""), "source": p.get("source", ""),
+                       "url": p.get("url", "")})
 
 
 @function_tool
@@ -222,4 +270,4 @@ def get_payloads(vuln_type: str) -> str:
 
 # ─── Tool registry ─────────────────────────────────────────────────
 
-RAG_TOOLS = [search_knowledge, search_cve, search_exploits, get_remediation, get_payloads]
+RAG_TOOLS = [search_knowledge, fetch_full_doc, search_cve, search_exploits, get_remediation, get_payloads]

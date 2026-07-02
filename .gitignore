@@ -17,6 +17,7 @@ results/
 # Qdrant vector DB (binary, rebuilt with: python knowledge/seed.py)
 knowledge/qdrant.db/
 knowledge/qdrant.db.lock
+knowledge/sources/
 
 # OS
 .DS_Store
