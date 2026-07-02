@@ -17,35 +17,31 @@ Runs inside a **Docker sandbox** (Kali Linux) — your host system is never touc
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Run the installer (installs everything — uv, Python deps, Go, nuclei, nmap, subfinder, httpx, ffuf, sqlmap)
 
 ```powershell
 # Windows
-pip install -r requirements.txt
-
-# Or use Docker (recommended — includes all security tools)
-docker build -t cert-in-pipeline .
+.\scripts\install.ps1
 ```
+
+```bash
+# Linux/macOS
+chmod +x scripts/install.sh && ./scripts/install.sh
+```
+
+After install, **restart your terminal** to pick up new PATH entries.
 
 ### 2. Set your API key
 
 Each provider reads its key from a specific environment variable:
 
 ```powershell
-# GLM (Z.ai) — get key from https://z.ai
-$env:GLM_API_KEY = "your-key-here"
-
-# OpenAI
-$env:OPENAI_API_KEY = "your-key-here"
-
-# Groq — get key from https://console.groq.com
-$env:GROQ_API_KEY = "your-key-here"
-
-# DeepSeek — get key from https://platform.deepseek.com
-$env:DEEPSEEK_API_KEY = "your-key-here"
-
-# Anthropic
-$env:ANTHROPIC_API_KEY = "your-key-here"
+# Windows (PowerShell)
+$env:GLM_API_KEY = "your-key-here"       # GLM (Z.ai) — get from https://z.ai
+$env:OPENAI_API_KEY = "your-key-here"    # OpenAI
+$env:GROQ_API_KEY = "your-key-here"      # Groq — get from https://console.groq.com
+$env:DEEPSEEK_API_KEY = "your-key-here"  # DeepSeek
+$env:ANTHROPIC_API_KEY = "your-key-here" # Anthropic
 ```
 
 ```bash
@@ -58,7 +54,7 @@ Local providers (Ollama, LM Studio, llama.cpp) don't need a key.
 ### 3. List all supported providers
 
 ```bash
-python pipeline.py providers
+uv run pipeline.py providers
 ```
 
 ---
@@ -71,22 +67,22 @@ Tests if a model can analyze security data. No real scanning. Scores the model 0
 
 ```powershell
 # GLM-5.2
-python pipeline.py benchmark --provider glm --model glm-5.2
+uv run pipeline.py benchmark --provider glm --model glm-5.2
 
 # Ollama (local, no key needed)
-python pipeline.py benchmark --provider ollama --model qwen2.5:7b
+uv run pipeline.py benchmark --provider ollama --model qwen2.5:7b
 
 # OpenAI
-python pipeline.py benchmark --provider openai --model gpt-4o
+uv run pipeline.py benchmark --provider openai --model gpt-4o
 
 # Groq
-python pipeline.py benchmark --provider groq --model llama-3.3-70b-versatile
+uv run pipeline.py benchmark --provider groq --model llama-3.3-70b-versatile
 
 # DeepSeek
-python pipeline.py benchmark --provider deepseek --model deepseek-chat
+uv run pipeline.py benchmark --provider deepseek --model deepseek-chat
 
 # Or pass key directly (skip env var)
-python pipeline.py benchmark --provider glm --model glm-5.2 --api-key "your-key"
+uv run pipeline.py benchmark --provider glm --model glm-5.2 --api-key "your-key"
 ```
 
 ### Live mode (scan a real website)
@@ -95,13 +91,13 @@ Runs actual security tools, feeds results to LLM, generates CERT-In report.
 
 ```powershell
 # With GLM
-python pipeline.py live --target example.com --provider glm --model glm-5.2
+uv run pipeline.py live --target example.com --provider glm --model glm-5.2
 
 # With local Ollama
-python pipeline.py live --target example.com --provider ollama --model qwen2.5:7b
+uv run pipeline.py live --target example.com --provider ollama --model qwen2.5:7b
 
 # Skip running tools (use if tools aren't installed)
-python pipeline.py live --target example.com --provider glm --model glm-5.2 --skip-tools
+uv run pipeline.py live --target example.com --provider glm --model glm-5.2 --skip-tools
 ```
 
 ### Docker sandbox (all tools pre-installed)
@@ -109,7 +105,9 @@ python pipeline.py live --target example.com --provider glm --model glm-5.2 --sk
 ```powershell
 # Windows
 .\scripts\run-docker.ps1 -Target example.com -ApiKey your-glm-key
+```
 
+```bash
 # Linux/macOS
 chmod +x scripts/run-docker.sh
 ./scripts/run-docker.sh example.com openai/glm-5.2 your-glm-key
@@ -118,7 +116,7 @@ chmod +x scripts/run-docker.sh
 ### Score a previous run
 
 ```powershell
-python pipeline.py score results/benchmark-results.json
+uv run pipeline.py score results/benchmark-results.json
 ```
 
 ---
