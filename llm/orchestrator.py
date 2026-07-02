@@ -190,7 +190,7 @@ def _create_agents(model_config: dict):
     """Create all agents for the swarm."""
 
     model = _make_model(model_config)
-    scan_tools = [t for t in EXPANDED_TOOLS if t.__name__ not in ("read_file", "write_file")]
+    scan_tools = [t for t in EXPANDED_TOOLS if t.name not in ("read_file", "write_file")]
 
     recon_agent = Agent(
         name="Recon",
@@ -220,7 +220,7 @@ def _create_agents(model_config: dict):
         name="Verifier",
         instructions=VERIFY_PROMPT,
         model=model,
-        tools=[t for t in scan_tools if t.__name__ in ("run_curl", "fetch_evidence", "check_security_headers")],
+        tools=[t for t in scan_tools if t.name in ("run_curl", "fetch_evidence", "check_security_headers")],
         output_type=VerifiedFinding,
     )
 
