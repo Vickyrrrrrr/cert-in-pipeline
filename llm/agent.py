@@ -72,86 +72,43 @@ def create_merged_agent(model_config: dict) -> Agent:
     client = AsyncOpenAI(base_url=api_base, api_key=api_key)
     model = OpenAIChatCompletionsModel(model=model_name, openai_client=client)
 
-    # Load key instructions from skills (condensed)
-    recon_skill = _load_skill("01-recon")
-    enum_skill = _load_skill("02-enumeration")
-    port_skill = _load_skill("03-port-scan")
-    vuln_skill = _load_skill("04-vuln-scan")
-    analysis_skill = _load_skill("05-analysis")
-    severity_skill = _load_skill("06-severity")
-    exploit_skill = _load_skill("07-exploitability")
-    report_skill = _load_skill("08-report")
-    remediation_skill = _load_skill("09-remediation")
+    system_prompt = f"""You are an expert security analyst. Scan the target and report vulnerabilities.
 
-    system_prompt = f"""You are an expert security analyst performing a comprehensive vulnerability assessment.
+TOOLS: run_httpx, run_subfinder, run_nmap, run_nuclei, run_curl, run_ffuf, run_sqlmap, write_file
 
-You have access to security tools (run_httpx, run_nmap, run_nuclei, run_subfinder, run_ffuf, run_curl, run_sqlmap, write_file).
+WORKFLOW (follow exactly):
+1. run_httpx(target) — probe HTTP, detect tech
+2. run_subfinder(domain) — find subdomains
+3. run_nmap(target) — scan ports
+4. run_nuclei(target) — scan for vulnerabilities
+5. run_curl(url) — verify findings
+6. write_file("results/cert-in-report.json", report) — save report
+7. STOP
 
-Follow this workflow EXACTLY:
+RULES:
+- Run each tool ONCE, then next
+- After write_file, STOP
+- If tool fails, continue to next
+- Only report VERIFIED vulnerabilities
+- Include POC curl command per vuln
+- Assign CVSS 3.1 scores
 
-## Phase 1: Reconnaissance
-Run run_httpx on the target. Then analyze using these guidelines:
-{recon_skill[:1500]}
+ANALYSIS GUIDELINES:
+- Check for: XSS, SQLi, SSRF, IDOR, path traversal, open redirects, CSRF, info disclosure
+- Check missing headers: CSP, HSTS, X-Frame-Options
+- Check exposed: .git, .env, backups, admin panels, API endpoints
+- Check cookies: HttpOnly, Secure, SameSite
+- Flag services that shouldn't be public: MySQL, Redis, MongoDB, Docker API
+- Verify business logic: price manipulation, auth bypass, race conditions
+- WAF/CDN detection affects scan results
 
-## Phase 2: Enumeration
-Run run_subfinder on the domain. Then analyze using these guidelines:
-{enum_skill[:1500]}
-
-## Phase 3: Port Scanning
-Run run_nmap on the target. Then analyze using these guidelines:
-{port_skill[:1500]}
-
-## Phase 4: Vulnerability Scanning
-Run run_nuclei on the target. Then classify findings using these guidelines:
-{vuln_skill[:1500]}
-
-## Phase 5: Verification
-For each finding, verify if it's a TRUE POSITIVE or FALSE POSITIVE:
-{analysis_skill[:1500]}
-
-## Phase 6: Severity Scoring
-Assign CVSS 3.1 scores to confirmed vulnerabilities:
-{severity_skill[:1000]}
-
-## Phase 7: Exploitability
-Assess real-world exploitability:
-{exploit_skill[:1000]}
-
-## Phase 8: Report
-Generate a CERT-In compliant report and save it using write_file:
-{report_skill[:1500]}
-
-## Phase 9: Remediation
-Provide specific fixes:
-{remediation_skill[:1000]}
-
-CRITICAL RULES:
-- Run each tool ONCE, analyze results, then move to next phase
-- After ALL phases complete, call write_file to save the report to results/cert-in-report.json
-- Then STOP — do not call any more tools
-- If a tool fails or times out, note it and continue to next phase
-- Only report VERIFIED vulnerabilities (not false positives)
-- Include POC curl commands for each vulnerability
-- Assign accurate CVSS 3.1 scores
-
-REPORT JSON FORMAT (save to results/cert-in-report.json):
+REPORT JSON (save to results/cert-in-report.json):
 {{
   "target": "...",
   "executive_summary": "...",
   "vulnerability_summary": {{"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}},
   "vulnerabilities": [
-    {{
-      "title": "...",
-      "severity": "CRITICAL|HIGH|MEDIUM|LOW",
-      "cvss_vector": "CVSS:3.1/...",
-      "cvss_score": 9.8,
-      "cwe": "CWE-XX",
-      "affected_component": "URL or service",
-      "description": "...",
-      "impact": "...",
-      "poc": "curl command",
-      "remediation": "specific fix with code"
-    }}
+    {{"title":"...","severity":"CRITICAL|HIGH|MEDIUM|LOW","cvss_vector":"CVSS:3.1/...","cvss_score":9.8,"cwe":"CWE-XX","affected_component":"...","description":"...","impact":"...","poc":"curl ...","remediation":"specific fix"}}
   ]
 }}
 """

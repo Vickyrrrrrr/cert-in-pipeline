@@ -330,12 +330,13 @@ def run_curl(url: str, method: str = "GET", headers: str = "") -> str:
     try:
         result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
         # Extract status line
+        stdout = result.stdout or ""
         status_line = ""
-        for line in result.stdout.split("\n"):
+        for line in stdout.split("\n"):
             if line.startswith("HTTP/"):
                 status_line = line.strip()
                 break
-        body_size = len(result.stdout)
+        body_size = len(stdout)
         if status_line:
             _tool_result(f"{status_line} â€” {body_size} bytes")
         else:
