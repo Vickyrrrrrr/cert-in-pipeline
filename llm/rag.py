@@ -18,8 +18,15 @@ from __future__ import annotations
 import json
 import urllib.request
 import urllib.parse
+import warnings
+import os
 from pathlib import Path
 from typing import Optional
+
+# Suppress noisy HuggingFace warnings
+warnings.filterwarnings("ignore")
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 
 from agents import function_tool
 

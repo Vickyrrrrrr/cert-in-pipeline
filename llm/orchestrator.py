@@ -49,6 +49,46 @@ set_tracing_disabled(True)
 # Local print lock for spinner (don't import from tools — avoid circular deps)
 _print_lock = threading.Lock()
 
+# Heartbeat spinner — runs continuously, cleared when tools print
+_heartbeat_stop = None
+_heartbeat_thread = None
+_heartbeat_active = False
+
+
+def _start_heartbeat():
+    """Start the Argus watching spinner in background."""
+    global _heartbeat_stop, _heartbeat_thread, _heartbeat_active
+    _heartbeat_stop = threading.Event()
+    _heartbeat_active = True
+
+    spinner = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
+    start = time.time()
+
+    def _spin():
+        i = 0
+        while not _heartbeat_stop.wait(0.15):
+            elapsed = int(time.time() - start)
+            with _print_lock:
+                sys.stdout.write(f"\r  {DIM}{spinner[i % len(spinner)]} Argus watching... ({elapsed}s){RESET}   ")
+                sys.stdout.flush()
+            i += 1
+
+    _heartbeat_thread = threading.Thread(target=_spin, daemon=True)
+    _heartbeat_thread.start()
+
+
+def _stop_heartbeat():
+    """Stop the spinner and clear the line."""
+    global _heartbeat_stop, _heartbeat_thread, _heartbeat_active
+    if _heartbeat_stop:
+        _heartbeat_stop.set()
+    if _heartbeat_thread:
+        _heartbeat_thread.join(timeout=1)
+    _heartbeat_active = False
+    with _print_lock:
+        sys.stdout.write("\r" + " " * 70 + "\r")
+        sys.stdout.flush()
+
 # ─── Aesthetic constants ───────────────────────────────────────────
 # Minimal palette — 4 colors only
 DIM = "\033[2m"
@@ -478,7 +518,10 @@ async def _run_phase_silent(agent: Agent, prompt: str, max_turns: int):
         result = await Runner.run(agent, prompt, max_turns=max_turns)
         return result.final_output, time.time() - start
     except Exception as e:
-        return None, time.time() - start
+        elapsed = time.time() - start
+        err = str(e)[:300]
+        print(f"  {RED}{CROSS} error: {err}{RESET}", flush=True)
+        return None, elapsed
 
 
 def _recon_summary(out: ReconOutput | None) -> str:
@@ -588,7 +631,8 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     recon_prompt = f"Perform reconnaissance on: {target}\nStore all raw output with store_evidence(). Output ReconOutput."
     enum_prompt = f"Perform enumeration on: {target}\nStore all raw output with store_evidence(). Output EnumOutput."
 
-    # Run in parallel — no spinner, tool output shows progress directly
+    # Run in parallel — heartbeat spinner + tool output both visible
+    _start_heartbeat()
     (recon_result, enum_result), phase1_time, _ = await _run_parallel(
         [
             (recon_agent, recon_prompt, 25, "recon"),
@@ -596,6 +640,7 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
         ],
         phase_label="",
     )
+    _stop_heartbeat()
 
     recon_out, recon_time = recon_result
     enum_out, enum_time = enum_result
@@ -630,7 +675,9 @@ For each target:
 Create a Finding for each vulnerability with evidence_ref pointing to stored evidence.
 Output VulnOutput.
 """
-    vuln_out, vuln_time = await _run_phase(vuln_agent, vuln_prompt, max_turns=35, label="vuln scanning")
+    _start_heartbeat()
+    vuln_out, vuln_time = await _run_phase(vuln_agent, vuln_prompt, max_turns=35, label="")
+    _stop_heartbeat()
 
     if not structured:
         vuln_out = _parse_output(vuln_out, VulnOutput)
