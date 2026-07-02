@@ -15,6 +15,9 @@ Architecture:
 
 from __future__ import annotations
 
+import warnings
+warnings.filterwarnings("ignore")
+
 import json
 import os
 import sys
@@ -395,7 +398,7 @@ def _create_agents(model_config: dict, provider_name: str = ""):
 
 
 def _parse_output(raw, model_class):
-    """Parse agent output into Pydantic model (handles text, markdown, partial JSON)."""
+    """Parse agent output into Pydantic model (handles text, markdown, truncated JSON)."""
     if raw is None:
         return None
     if isinstance(raw, model_class):
@@ -404,7 +407,7 @@ def _parse_output(raw, model_class):
         import re
         text = raw.strip()
 
-        # Strip markdown code blocks: ```json ... ``` or ``` ... ```
+        # Extract JSON from markdown code blocks
         if "```" in text:
             parts = text.split("```")
             for part in parts:
@@ -412,30 +415,51 @@ def _parse_output(raw, model_class):
                 if part.startswith("json"):
                     part = part[4:].strip()
                 if part.startswith("{"):
-                    try:
-                        return model_class.model_validate_json(part)
-                    except Exception:
-                        continue
+                    result = _try_parse_json(part, model_class)
+                    if result:
+                        return result
 
         # Try parsing as JSON directly
-        try:
-            return model_class.model_validate_json(text)
-        except Exception:
-            pass
+        result = _try_parse_json(text, model_class)
+        if result:
+            return result
 
         # Try extracting the largest JSON object
         json_match = re.search(r'\{[\s\S]*\}', text)
         if json_match:
-            json_str = json_match.group(0)
-            try:
-                return model_class.model_validate_json(json_str)
-            except Exception:
-                # Try progressively smaller JSON
-                for i in range(len(json_str), 10, -1):
-                    try:
-                        return model_class.model_validate_json(json_str[:i])
-                    except Exception:
-                        continue
+            result = _try_parse_json(json_match.group(0), model_class)
+            if result:
+                return result
+    return None
+
+
+def _try_parse_json(json_str: str, model_class) -> object | None:
+    """Try to parse JSON, auto-closing truncated JSON if needed."""
+    import re
+
+    # Try as-is first
+    try:
+        return model_class.model_validate_json(json_str)
+    except Exception:
+        pass
+
+    # Try progressively smaller substrings
+    for i in range(len(json_str), 10, -1):
+        try:
+            return model_class.model_validate_json(json_str[:i])
+        except Exception:
+            continue
+
+    # Try auto-closing truncated JSON (add missing brackets/braces)
+    truncated = json_str.strip().rstrip('"').rstrip(',').rstrip()
+    open_braces = truncated.count('{') - truncated.count('}')
+    open_brackets = truncated.count('[') - truncated.count(']')
+    closed = truncated + ('}' * max(0, open_braces)) + (']' * max(0, open_brackets))
+    try:
+        return model_class.model_validate_json(closed)
+    except Exception:
+        pass
+
     return None
 
 
@@ -783,6 +807,15 @@ Output ScanReport.
     summary_lines.append(f"time     {DOT}  {total_time:.1f}s total")
 
     _box(f"{CHECK} complete", summary_lines, GREEN)
+
+    # Close Qdrant client gracefully (suppress shutdown warning)
+    try:
+        from llm.rag import _get_client
+        client = _get_client()
+        if client:
+            client.close()
+    except Exception:
+        pass
 
     return {"status": "completed", "report": None, "findings": len(verified_findings)}
 
