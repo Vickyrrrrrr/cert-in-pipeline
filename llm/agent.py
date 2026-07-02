@@ -1,13 +1,13 @@
-"""Security analyst agent — uses OpenAI Agents SDK with live output via hooks."""
+"""Security analyst agent — uses OpenAI Agents SDK with tool execution.
+
+Live output is handled by print() inside each tool function.
+"""
 
 import json
 import os
 from pathlib import Path
 
-from agents import (
-    Agent, Runner, set_tracing_disabled,
-    RunHooks, AgentHooks,
-)
+from agents import Agent, Runner, set_tracing_disabled
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 
@@ -15,27 +15,10 @@ from llm.tools import SECURITY_TOOLS
 
 set_tracing_disabled(True)
 
-
-class LiveHooks(RunHooks):
-    """Hooks that print agent actions in real-time — like OpenCode/Claude Code."""
-
-    def on_agent_start(self, context, agent):
-        print(f"\n[AGENT] {agent.name} started", flush=True)
-
-    def on_tool_start(self, context, agent, tool):
-        name = getattr(tool, 'name', str(tool))
-        print(f"\n  > CALLING: {name}", flush=True)
-
-    def on_tool_end(self, context, agent, tool, result):
-        name = getattr(tool, 'name', str(tool))
-        # Truncate result for display
-        s = str(result)
-        if len(s) > 150:
-            s = s[:150] + "..."
-        print(f"  < RESULT ({name}): {s}", flush=True)
-
-    def on_agent_end(self, context, agent, output):
-        print(f"\n[AGENT] {agent.name} finished", flush=True)
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+RED = "\033[31m"
+RESET = "\033[0m"
 
 
 def create_security_agent(model_config: dict) -> Agent:
@@ -103,7 +86,6 @@ def run_agent_scan(target: str, model_config: dict, console=None) -> dict:
     """Run the security agent against a target with live output."""
 
     agent = create_security_agent(model_config)
-    hooks = LiveHooks()
 
     prompt = f"""Perform a security assessment of {target}.
 
@@ -112,18 +94,22 @@ Call run_httpx first, then run_subfinder, run_nmap, run_nuclei, run_curl to veri
 Then STOP. Do not call any more tools after writing the report.
 """
 
-    if console:
-        console.print(f"\n[bold cyan]Agent starting...[/]")
-        console.print(f"[dim]Target: {target}[/]")
-        console.print(f"[dim]Model: {model_config['name']}[/]")
-        console.print(f"[dim]Live output: ON (via hooks)[/]\n")
+    print(f"\n{'='*55}", flush=True)
+    print(f"  Agent starting for: {target}", flush=True)
+    print(f"  Model: {model_config['name']}", flush=True)
+    print(f"  API:   {model_config.get('api_base', 'default')}", flush=True)
+    print(f"  Live:  tool calls shown in real-time", flush=True)
+    print(f"{'='*55}", flush=True)
+    print(f"  {CYAN}>{RESET} = calling tool    {GREEN}+{RESET} = result    {RED}!{RESET} = error", flush=True)
+    print(f"{'='*55}\n", flush=True)
 
     try:
-        result = Runner.run_sync(agent, prompt, max_turns=30, hooks=hooks)
+        result = Runner.run_sync(agent, prompt, max_turns=30)
 
-        if console:
-            console.print(f"\n[bold green]Agent finished![/]")
-            console.print(f"[dim]Final output: {str(result.final_output)[:300]}[/]")
+        print(f"\n{'='*55}", flush=True)
+        print(f"  Agent finished!", flush=True)
+        print(f"  Final output: {str(result.final_output)[:200]}", flush=True)
+        print(f"{'='*55}\n", flush=True)
 
         report_path = Path("results") / "cert-in-report.json"
         if report_path.exists():
@@ -138,6 +124,5 @@ Then STOP. Do not call any more tools after writing the report.
         }
 
     except Exception as e:
-        if console:
-            console.print(f"\n[red]Error: {e}[/]")
+        print(f"\n  ERROR: {e}")
         return {"status": "error", "error": str(e)}

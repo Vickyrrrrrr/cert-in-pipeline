@@ -1,4 +1,4 @@
-"""Security agent tools — each tool prints its execution live."""
+"""Security agent tools — each tool prints its execution live with colors."""
 
 import subprocess
 import shutil
@@ -8,18 +8,29 @@ import sys
 from pathlib import Path
 from agents import function_tool
 
+# ANSI colors
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
+
 
 def _log(msg):
-    """Print a live status message."""
-    print(f"  > {msg}", flush=True)
+    """Tool starting."""
+    print(f"  {CYAN}>{RESET} {msg}", flush=True)
 
 
-def _log_result(data, max_len=200):
-    """Print a truncated result."""
-    s = json.dumps(data) if isinstance(data, dict) else str(data)
-    if len(s) > max_len:
-        s = s[:max_len] + "..."
-    print(f"  < {s}", flush=True)
+def _log_result(msg):
+    """Tool succeeded."""
+    print(f"  {GREEN}+{RESET} {msg}", flush=True)
+
+
+def _log_error(msg):
+    """Tool failed."""
+    print(f"  {RED}!{RESET} {msg}", flush=True)
 
 
 @function_tool
@@ -28,7 +39,7 @@ def run_nuclei(target: str, severity: str = "low,medium,high,critical") -> str:
     _log(f"nuclei -u {target} -severity {severity}")
     nuclei_path = shutil.which("nuclei")
     if not nuclei_path:
-        _log("nuclei not found")
+        _log_error("nuclei not installed")
         return json.dumps({"error": "nuclei not installed", "findings": []})
 
     cmd = [nuclei_path, "-u", target, "-json", "-silent", "-severity", severity]
@@ -42,13 +53,16 @@ def run_nuclei(target: str, severity: str = "low,medium,high,critical") -> str:
                     findings.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-        _log(f"nuclei found {len(findings)} findings")
+        if findings:
+            _log_result(f"nuclei found {len(findings)} vulnerabilities")
+        else:
+            _log_result("nuclei found 0 vulnerabilities")
         return json.dumps({"findings": findings, "count": len(findings)})
     except subprocess.TimeoutExpired:
-        _log("nuclei timed out")
+        _log_error("nuclei timed out")
         return json.dumps({"error": "timeout", "findings": []})
     except Exception as e:
-        _log(f"nuclei error: {e}")
+        _log_error(f"nuclei error: {e}")
         return json.dumps({"error": str(e), "findings": []})
 
 
@@ -58,19 +72,19 @@ def run_nmap(target: str, scan_type: str = "-sV --top-ports 1000") -> str:
     _log(f"nmap {scan_type} {target}")
     nmap_path = shutil.which("nmap")
     if not nmap_path:
-        _log("nmap not found")
+        _log_error("nmap not installed")
         return json.dumps({"error": "nmap not installed", "hosts": []})
 
     cmd = [nmap_path] + scan_type.split() + ["-oX", "-", target]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
-        _log(f"nmap done ({len(result.stdout)} bytes)")
+        _log_result(f"nmap completed ({len(result.stdout)} bytes of XML)")
         return result.stdout
     except subprocess.TimeoutExpired:
-        _log("nmap timed out")
+        _log_error("nmap timed out")
         return json.dumps({"error": "timeout"})
     except Exception as e:
-        _log(f"nmap error: {e}")
+        _log_error(f"nmap error: {e}")
         return json.dumps({"error": str(e)})
 
 
@@ -80,20 +94,23 @@ def run_subfinder(domain: str) -> str:
     _log(f"subfinder -d {domain}")
     subfinder_path = shutil.which("subfinder")
     if not subfinder_path:
-        _log("subfinder not found")
+        _log_error("subfinder not installed")
         return json.dumps({"error": "not installed", "subdomains": []})
 
     cmd = [subfinder_path, "-d", domain, "-silent"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
         subs = [s.strip() for s in result.stdout.strip().split("\n") if s.strip()]
-        _log(f"subfinder found {len(subs)} subdomains")
+        if subs:
+            _log_result(f"subfinder found {len(subs)} subdomains")
+        else:
+            _log_result("subfinder found 0 subdomains")
         return json.dumps({"subdomains": subs, "count": len(subs)})
     except subprocess.TimeoutExpired:
-        _log("subfinder timed out")
+        _log_error("subfinder timed out")
         return json.dumps({"error": "timeout", "subdomains": []})
     except Exception as e:
-        _log(f"subfinder error: {e}")
+        _log_error(f"subfinder error: {e}")
         return json.dumps({"error": str(e), "subdomains": []})
 
 
@@ -103,7 +120,7 @@ def run_httpx(urls: str) -> str:
     _log(f"httpx -u {urls}")
     httpx_path = shutil.which("httpx")
     if not httpx_path:
-        _log("httpx not found")
+        _log_error("httpx not installed")
         return json.dumps({"error": "not installed", "results": []})
 
     cmd = [httpx_path, "-u", urls, "-json", "-silent", "-status-code", "-title", "-tech-detect"]
@@ -117,13 +134,16 @@ def run_httpx(urls: str) -> str:
                     results.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-        _log(f"httpx probed {len(results)} hosts")
+        if results:
+            _log_result(f"httpx probed {len(results)} hosts successfully")
+        else:
+            _log_result("httpx probed 0 hosts")
         return json.dumps({"results": results, "count": len(results)})
     except subprocess.TimeoutExpired:
-        _log("httpx timed out")
+        _log_error("httpx timed out")
         return json.dumps({"error": "timeout", "results": []})
     except Exception as e:
-        _log(f"httpx error: {e}")
+        _log_error(f"httpx error: {e}")
         return json.dumps({"error": str(e), "results": []})
 
 
@@ -133,7 +153,7 @@ def run_ffuf(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt") -
     _log(f"ffuf -u {url}")
     ffuf_path = shutil.which("ffuf")
     if not ffuf_path:
-        _log("ffuf not found")
+        _log_error("ffuf not installed")
         return json.dumps({"error": "not installed", "results": []})
 
     cmd = [ffuf_path, "-u", url, "-w", wordlist, "-json", "-mc", "200,301,302,403", "-t", "40"]
@@ -153,13 +173,16 @@ def run_ffuf(url: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt") -
                         })
                 except json.JSONDecodeError:
                     continue
-        _log(f"ffuf found {len(results)} paths")
+        if results:
+            _log_result(f"ffuf found {len(results)} paths")
+        else:
+            _log_result("ffuf found 0 paths")
         return json.dumps({"results": results, "count": len(results)})
     except subprocess.TimeoutExpired:
-        _log("ffuf timed out")
+        _log_error("ffuf timed out")
         return json.dumps({"error": "timeout", "results": []})
     except Exception as e:
-        _log(f"ffuf error: {e}")
+        _log_error(f"ffuf error: {e}")
         return json.dumps({"error": str(e), "results": []})
 
 
@@ -169,6 +192,7 @@ def run_curl(url: str, method: str = "GET", headers: str = "") -> str:
     _log(f"curl -X {method} {url}")
     curl_path = shutil.which("curl") or shutil.which("curl.exe")
     if not curl_path:
+        _log_error("curl not installed")
         return "curl not installed"
 
     cmd = [curl_path, "-s", "-i", "-X", method, "--max-time", "30", url]
@@ -180,13 +204,13 @@ def run_curl(url: str, method: str = "GET", headers: str = "") -> str:
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
-        _log(f"curl got {len(result.stdout)} bytes")
+        _log_result(f"curl got {len(result.stdout)} bytes response")
         return result.stdout
     except subprocess.TimeoutExpired:
-        _log("curl timed out")
+        _log_error("curl timed out")
         return "timeout"
     except Exception as e:
-        _log(f"curl error: {e}")
+        _log_error(f"curl error: {e}")
         return f"Error: {e}"
 
 
@@ -196,7 +220,7 @@ def run_sqlmap(url: str, params: str = "") -> str:
     _log(f"sqlmap -u {url}")
     sqlmap_path = shutil.which("sqlmap") or shutil.which("sqlmap")
     if not sqlmap_path:
-        _log("sqlmap not found")
+        _log_error("sqlmap not installed")
         return json.dumps({"error": "not installed"})
 
     cmd = [sqlmap_path, "-u", url, "--batch"]
@@ -204,13 +228,13 @@ def run_sqlmap(url: str, params: str = "") -> str:
         cmd.extend(params.split())
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
-        _log("sqlmap done")
+        _log_result("sqlmap completed")
         return result.stdout + result.stderr
     except subprocess.TimeoutExpired:
-        _log("sqlmap timed out")
+        _log_error("sqlmap timed out")
         return "timeout"
     except Exception as e:
-        _log(f"sqlmap error: {e}")
+        _log_error(f"sqlmap error: {e}")
         return f"Error: {e}"
 
 
@@ -221,10 +245,10 @@ def read_file(path: str) -> str:
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-        _log(f"read {len(content)} chars")
+        _log_result(f"read {len(content)} chars from {path}")
         return content
     except Exception as e:
-        _log(f"read error: {e}")
+        _log_error(f"read error: {e}")
         return f"Error: {e}"
 
 
@@ -236,10 +260,10 @@ def write_file(path: str, content: str) -> str:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        _log(f"wrote to {path}")
+        _log_result(f"report saved to {path}")
         return f"Successfully wrote to {path}"
     except Exception as e:
-        _log(f"write error: {e}")
+        _log_error(f"write error: {e}")
         return f"Error: {e}"
 
 
