@@ -16,7 +16,7 @@ if [ -z "$API_KEY" ] && [ "$PROVIDER" != "ollama" ]; then
 fi
 
 echo "Building Docker image..."
-docker build -t cert-in-pipeline .
+docker build -t argus .
 
 echo ""
 echo "Running pipeline in sandbox..."
@@ -32,7 +32,7 @@ docker run --rm \
     -e "GLM_API_KEY=$API_KEY" \
     -e "OPENAI_API_KEY=$API_KEY" \
     --add-host=host.docker.internal:host-gateway \
-    cert-in-pipeline \
+    argus \
     live --target "$TARGET" --provider "$PROVIDER" --model "$MODEL" --api-base "$API_BASE" --api-key "$API_KEY" --output /pipeline/results
 
 echo ""

@@ -6,7 +6,7 @@
 services:
   pipeline:
     build: .
-    container_name: cert-in-pipeline
+    container_name: argus
     volumes:
       # Mount results so they persist after container exits
       - ./results:/pipeline/results

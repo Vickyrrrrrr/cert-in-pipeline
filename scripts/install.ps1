@@ -1,6 +1,6 @@
 ﻿# Argus Installer (Windows) — all tools, no manual setup needed
 # One-liner:
-#   curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/cert-in-pipeline/master/scripts/install.ps1 | powershell -c -
+#   curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/argus/master/scripts/install.ps1 | powershell -c -
 
 $ErrorActionPreference = "Stop"
 Write-Host "========================================" -ForegroundColor Cyan
@@ -8,10 +8,10 @@ Write-Host "  Argus - Installer (Windows)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 # Ensure we're in the repo directory
-$repoDir = Join-Path $env:USERPROFILE 'cert-in-pipeline'
+$repoDir = Join-Path $env:USERPROFILE 'argus'
 if (-not (Test-Path (Join-Path $repoDir 'pipeline.py'))) {
-    Write-Host "Cloning cert-in-pipeline to $repoDir ..." -ForegroundColor Yellow
-    git clone --depth 1 https://github.com/Vickyrrrrrr/cert-in-pipeline.git $repoDir 2>$null
+    Write-Host "Cloning argus to $repoDir ..." -ForegroundColor Yellow
+    git clone --depth 1 https://github.com/Vickyrrrrrr/argus.git $repoDir 2>$null
     if (-not (Test-Path (Join-Path $repoDir 'pipeline.py'))) {
         Write-Host "  Failed to clone repo" -ForegroundColor Red
         exit 1

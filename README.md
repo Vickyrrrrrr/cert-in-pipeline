@@ -1,4 +1,4 @@
-# CERT-In Vulnerability Pipeline
+# Argus
 
 An open-source **multi-agent security scanning swarm** with LLM-powered analysis, RAG knowledge base, and independent vulnerability verification. Reports to CERT-In (Indian Computer Emergency Response Team).
 
@@ -23,10 +23,10 @@ An open-source **multi-agent security scanning swarm** with LLM-powered analysis
 
 ```bash
 # Linux/macOS
-curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/cert-in-pipeline/master/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/argus/master/scripts/install.sh | bash
 
 # Windows (PowerShell)
-curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/cert-in-pipeline/master/scripts/install.ps1 | powershell -c -
+curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/argus/master/scripts/install.ps1 | powershell -c -
 ```
 
 This installs: uv (Python package manager), Python deps, nuclei, nmap, subfinder, httpx, ffuf, sqlmap.
@@ -34,7 +34,7 @@ This installs: uv (Python package manager), Python deps, nuclei, nmap, subfinder
 ### 2. Build the knowledge base (one-time, ~2 min)
 
 ```bash
-cd ~/cert-in-pipeline
+cd ~/argus
 uv run python knowledge/seed.py
 ```
 
@@ -255,10 +255,10 @@ A model scoring **80%+** is certified as **"CERT-In Pipeline Ready"**.
 
 ```bash
 # Build
-docker build -t cert-in-pipeline .
+docker build -t argus .
 
 # Run
-docker run -e GLM_API_KEY=your-key cert-in-pipeline swarm --target example.com --provider glm --model glm-5-turbo
+docker run -e GLM_API_KEY=your-key argus swarm --target example.com --provider glm --model glm-5-turbo
 ```
 
 Or use the helper scripts:
@@ -275,7 +275,7 @@ Or use the helper scripts:
 ## Project Structure
 
 ```
-cert-in-pipeline/
+argus/
 ├── pipeline.py              # CLI entry point (swarm | agent | benchmark | live)
 ├── config.yaml              # Configuration
 ├── providers.yaml           # 22 LLM provider configs

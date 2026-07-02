@@ -206,7 +206,7 @@ def search_cve(keyword: str, limit: int = 5) -> str:
     params = urllib.parse.urlencode({"keywordSearch": keyword, "resultsPerPage": min(limit, 20)})
     full_url = f"{url}?{params}"
     try:
-        req = urllib.request.Request(full_url, headers={"User-Agent": "cert-in-pipeline"})
+        req = urllib.request.Request(full_url, headers={"User-Agent": "argus"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         cves = []

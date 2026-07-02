@@ -21,7 +21,7 @@ if (-not $ApiKey -and $Provider -ne "ollama") {
 }
 
 Write-Host "Building Docker image..." -ForegroundColor Cyan
-docker build -t cert-in-pipeline .
+docker build -t argus .
 
 Write-Host "`nRunning pipeline in sandbox..." -ForegroundColor Cyan
 Write-Host "Target: $Target" -ForegroundColor Yellow
@@ -36,7 +36,7 @@ docker run --rm `
     -e "GLM_API_KEY=$ApiKey" `
     -e "OPENAI_API_KEY=$ApiKey" `
     --add-host=host.docker.internal:host-gateway `
-    cert-in-pipeline `
+    argus `
     live --target $Target --provider $Provider --model $Model --api-base $ApiBase --api-key $ApiKey --output /pipeline/results
 
 Write-Host "`nResults saved to .\results\" -ForegroundColor Green

@@ -159,7 +159,7 @@ def smart_chunk(text: str, source: str, category: str, title: str, url: str, doc
 
 def _fetch(url: str, timeout: int = 30) -> str:
     headers = {
-        "User-Agent": "cert-in-pipeline-seed/1.0",
+        "User-Agent": "argus-seed/1.0",
         "Accept": "text/html,application/json,application/xml,text/plain",
     }
     req = urllib.request.Request(url, headers=headers)
@@ -376,7 +376,7 @@ def fetch_cwe() -> list[Chunk]:
     try:
         url = "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip"
         import zipfile, io
-        req = urllib.request.Request(url, headers={"User-Agent": "cert-in-pipeline-seed/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "argus-seed/1.0"})
         with urllib.request.urlopen(req, timeout=60) as resp:
             zdata = resp.read()
         zf = zipfile.ZipFile(io.BytesIO(zdata))

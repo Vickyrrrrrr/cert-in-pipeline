@@ -1,6 +1,6 @@
 #!/bin/bash
 # Argus — One-liner install (Linux/macOS)
-#   curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/cert-in-pipeline/master/scripts/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/argus/master/scripts/install.sh | bash
 set -e
 
 BIN="${HOME}/.local/bin"
@@ -20,12 +20,12 @@ fi
 echo "  uv $(uv --version 2>/dev/null || echo 'ok')"
 
 # ─── 2. Clone repo ──────────────────────────────────────────────────
-echo -e "\n[2/8] Fetching cert-in-pipeline..."
-TARGET="${HOME}/cert-in-pipeline"
+echo -e "\n[2/8] Fetching argus..."
+TARGET="${HOME}/argus"
 if [ -d "$TARGET" ]; then
   echo "  Already cloned at $TARGET"
 else
-  git clone --depth 1 https://github.com/Vickyrrrrrr/cert-in-pipeline.git "$TARGET"
+  git clone --depth 1 https://github.com/Vickyrrrrrr/argus.git "$TARGET"
 fi
 cd "$TARGET"
 
@@ -115,7 +115,7 @@ for tool in uv python3 nuclei subfinder httpx ffuf nmap sqlmap nikto whatweb sea
 done
 echo ""
 echo "Next:"
-echo "  cd ~/cert-in-pipeline"
+echo "  cd ~/argus"
 echo "  uv run python knowledge/seed.py"
 echo '  export API_KEY="your-key"'
 echo "  uv run python pipeline.py swarm --target example.com --provider glm --model glm-5-turbo"
