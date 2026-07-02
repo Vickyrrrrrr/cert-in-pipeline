@@ -258,7 +258,7 @@ def swarm(target, provider, model, api_base, api_key, config, output):
     model_cfg = resolve_model(provider, model, api_key, api_base, cfg)
 
     console.print(Panel.fit(
-        f"[bold blue]Argus — the hundred-eyed sentinel[/]\n"
+        f"[bold blue]Argus[/]\n"
         f"Target: {target}\n"
         f"Provider: {provider or 'custom'}\n"
         f"Model: {model_cfg['name']}\n"

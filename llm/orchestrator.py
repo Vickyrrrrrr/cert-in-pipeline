@@ -493,7 +493,7 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     _box(
         f"{DIAMOND} Argus",
         [
-            f"the hundred-eyed sentinel {DOT} {target}",
+            f"target  {DOT}  {target}",
             f"model   {DOT}  {model_config['name']}",
             f"agents  {DOT}  5 eyes (recon {ARROW_R} enum {ARROW_R} vuln {ARROW_R} verify {ARROW_R} report)",
             f"tools   {DOT}  17 security + 6 RAG",
