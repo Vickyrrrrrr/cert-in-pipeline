@@ -45,6 +45,15 @@ HOURGLASS = "\u23f3" # hourglass
 # Global flag for heartbeat
 _thinking = True
 
+# When True, tools suppress their own printing (swarm mode handles output)
+_quiet = False
+
+
+def set_quiet(value: bool = True):
+    """Enable/disable quiet mode (swarm orchestrator uses this)."""
+    global _quiet
+    _quiet = value
+
 
 def _safe_print(msg):
     """Thread-safe print."""
@@ -63,6 +72,8 @@ def _tool_call(name, cmd=None, **kwargs):
     """Print tool call with actual command for reproducibility."""
     global _thinking
     _thinking = False
+    if _quiet:
+        return
     _clear_line()
     args = ", ".join(f'{k}="{v}"' if isinstance(v, str) else f'{k}={v}' for k, v in kwargs.items())
     if len(args) > 80:
@@ -80,6 +91,8 @@ def _tool_result(msg, status="ok"):
     """Print result."""
     global _thinking
     _thinking = True
+    if _quiet:
+        return
     if status == "ok":
         icon = f"{GREEN}{CIRCLE}{RESET}"
     elif status == "error":
@@ -91,6 +104,8 @@ def _tool_result(msg, status="ok"):
 
 def _tool_running(msg):
     """Print running status."""
+    if _quiet:
+        return
     _safe_print(f"  {DIM}{HOURGLASS} {msg}...{RESET}")
 
 

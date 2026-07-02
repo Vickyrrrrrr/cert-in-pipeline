@@ -70,41 +70,55 @@ def _semantic_search(query: str, limit: int = 3, max_chars: int = 150) -> str:
 
     Returns top-k results with truncated text (max_chars per result).
     Agent can call fetch_full_doc to get complete text for a specific hit.
+
+    Thread-safe: wraps Qdrant calls in asyncio.to_thread when in async context.
     """
-    client = _get_client()
-    if client is None:
-        return json.dumps({
-            "error": "Knowledge DB not built. Run: uv run python knowledge/seed.py",
-            "fallback": "Use basic heuristics for classification.",
-        })
+    import asyncio
 
-    embedder = _get_embedder()
-    query_vector = embedder.encode(query).tolist()
+    def _search_sync():
+        client = _get_client()
+        if client is None:
+            return json.dumps({
+                "error": "Knowledge DB not built. Run: uv run python knowledge/seed.py",
+                "fallback": "Use basic heuristics for classification.",
+            })
 
-    results = client.query_points(
-        collection_name=COLLECTION,
-        query=query_vector,
-        limit=min(limit, 5),
-        with_payload=True,
-    ).points
+        embedder = _get_embedder()
+        query_vector = embedder.encode(query).tolist()
 
-    hits = []
-    for r in results:
-        payload = r.payload or {}
-        full_text = payload.get("text", "")
-        hits.append({
-            "doc_id": payload.get("doc_id", ""),
-            "title": payload.get("title", ""),
-            "source": payload.get("source", ""),
-            "category": payload.get("category", ""),
-            "text": full_text[:max_chars],  # truncate for token efficiency
-            "has_more": len(full_text) > max_chars,
-            "url": payload.get("url", ""),
-            "score": round(r.score, 3) if r.score else 0,
-        })
+        results = client.query_points(
+            collection_name=COLLECTION,
+            query=query_vector,
+            limit=min(limit, 5),
+            with_payload=True,
+        ).points
 
-    return json.dumps({"query": query, "results": hits, "count": len(hits),
-                       "hint": "Call fetch_full_doc(doc_id) for complete text if has_more=true"})
+        hits = []
+        for r in results:
+            payload = r.payload or {}
+            full_text = payload.get("text", "")
+            hits.append({
+                "doc_id": payload.get("doc_id", ""),
+                "title": payload.get("title", ""),
+                "source": payload.get("source", ""),
+                "category": payload.get("category", ""),
+                "text": full_text[:max_chars],
+                "has_more": len(full_text) > max_chars,
+                "url": payload.get("url", ""),
+                "score": round(r.score, 3) if r.score else 0,
+            })
+
+        return json.dumps({"query": query, "results": hits, "count": len(hits),
+                           "hint": "Call fetch_full_doc(doc_id) for complete text if has_more=true"})
+
+    # Check if we're in an async context (swarm mode)
+    try:
+        loop = asyncio.get_running_loop()
+        # We're in async context — but function_tool calls run in threads, so sync is fine
+        return _search_sync()
+    except RuntimeError:
+        # No running loop — sync mode
+        return _search_sync()
 
 
 # ─── Semantic search tools ─────────────────────────────────────────

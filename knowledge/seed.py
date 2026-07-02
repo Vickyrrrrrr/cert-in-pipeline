@@ -253,10 +253,20 @@ def fetch_nuclei_templates(quick: bool = False) -> list[Chunk]:
 
 
 def _extract_yaml_field(yaml_text: str, field: str) -> str:
-    """Lightweight YAML field extraction (avoids pyyaml dependency)."""
+    """Lightweight YAML field extraction — handles nested info: block and block scalars."""
     import re
-    match = re.search(rf'^{field}:\s*["\']?(.+?)["\']?\s*$', yaml_text, re.MULTILINE)
-    return match.group(1).strip() if match else ""
+    # Try top-level: field: value  OR  indented under info:  field: value
+    match = re.search(rf'^\s*{field}:\s*["\']?(.+?)["\']?\s*$', yaml_text, re.MULTILINE)
+    if match:
+        val = match.group(1).strip()
+        if val and val != "|":
+            return val
+    # Block scalar: field: | followed by indented lines
+    match = re.search(rf'^\s*{field}:\s*\|?\s*\n((?:[ \t]+.+\n?)+)', yaml_text, re.MULTILINE)
+    if match:
+        lines = [line.strip() for line in match.group(1).strip().split("\n")]
+        return " ".join(lines)[:300]
+    return ""
 
 
 # ─── Source 2: PayloadsAllTheThings (MIT) ──────────────────────────
