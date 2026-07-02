@@ -287,7 +287,7 @@ def run_command(command: str) -> str:
         return f"Error: {e}"
 
 
-# Export all tools
+# Export all tools (run_command excluded — LLM should use specialized tools)
 SECURITY_TOOLS = [
     run_nuclei,
     run_nmap,
@@ -298,5 +298,4 @@ SECURITY_TOOLS = [
     run_sqlmap,
     read_file,
     write_file,
-    run_command,
 ]

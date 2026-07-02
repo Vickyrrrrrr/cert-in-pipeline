@@ -22,6 +22,9 @@ import os
 import sys
 from pathlib import Path
 
+# Disable OpenAI Agents SDK tracing BEFORE any imports
+os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
+
 import click
 import yaml
 from rich.console import Console
