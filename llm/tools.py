@@ -418,6 +418,230 @@ def write_file(path, content):
         return f"Error: {e}"
 
 
+# ─── Evidence store tools (context isolation) ──────────────────────
+
+@function_tool
+def store_evidence(tool_name: str, target: str, command: str, raw_output: str):
+    """Store raw tool output in the evidence database. Returns evidence_id (ev_XXXXXX).
+
+    Use this when a tool produces large output. Store the raw output here
+    and keep only the evidence_id + summary in your response.
+    """
+    _tool_call("store_evidence", tool=tool_name, target=target)
+    try:
+        from llm import evidence
+        eid = evidence.store(tool_name, target, command, raw_output)
+        _tool_result(f"Stored as {eid}")
+        return json.dumps({"evidence_id": eid, "stored": True})
+    except Exception as e:
+        _tool_result(f"error: {e}", "error")
+        return json.dumps({"error": str(e), "stored": False})
+
+
+@function_tool
+def fetch_evidence(evidence_id: str):
+    """Fetch raw evidence from the store by its ID (ev_XXXXXX).
+
+    Use this to retrieve the full raw output of a previous tool call
+    for verification or deeper analysis.
+    """
+    _tool_call("fetch_evidence", id=evidence_id)
+    try:
+        from llm import evidence
+        result = evidence.fetch(evidence_id)
+        if result:
+            _tool_result(f"Fetched {result['tool']} output ({len(result['raw_output'])} chars)")
+            return json.dumps(result)
+        _tool_result("Not found", "error")
+        return json.dumps({"error": "evidence not found"})
+    except Exception as e:
+        _tool_result(f"error: {e}", "error")
+        return json.dumps({"error": str(e)})
+
+
+# ─── Expanded security tools ───────────────────────────────────────
+
+@function_tool
+def run_whatweb(target):
+    """Fingerprint web technologies (CMS, frameworks, JS libraries, servers)."""
+    url = _normalize_url(target)
+    _tool_call("run_whatweb", target=url)
+    whatweb_path = shutil.which("whatweb")
+    if not whatweb_path:
+        _tool_result("whatweb not installed", "error")
+        return json.dumps({"error": "not installed", "tech": []})
+    _tool_running("fingerprinting technologies")
+    cmd = [whatweb_path, "-q", "--color=never", url]
+    try:
+        result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
+        output = result.stdout or ""
+        _tool_result(f"Tech detected: {output.strip()[:100]}")
+        return json.dumps({"tech": output.strip(), "raw": output[:2000]})
+    except subprocess.TimeoutExpired:
+        _tool_result("timed out", "error")
+        return json.dumps({"error": "timeout"})
+    except Exception as e:
+        _tool_result(f"error: {e}", "error")
+        return json.dumps({"error": str(e)})
+
+
+@function_tool
+def run_nikto(target):
+    """Run Nikto web server vulnerability scanner against a target."""
+    url = _normalize_url(target)
+    _tool_call("run_nikto", target=url)
+    nikto_path = shutil.which("nikto")
+    if not nikto_path:
+        _tool_result("nikto not installed", "error")
+        return json.dumps({"error": "not installed", "findings": []})
+    _tool_running("scanning with Nikto")
+    cmd = [nikto_path, "-h", url, "-Format", "json", "-nointeractive", "-timeout", "10"]
+    try:
+        result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
+        output = result.stdout or ""
+        findings = []
+        for line in output.strip().split("\n"):
+            line = line.strip()
+            if line and line.startswith("{"):
+                try:
+                    findings.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        _tool_result(f"Found {len(findings)} Nikto findings")
+        return json.dumps({"findings": findings, "raw": output[:3000]})
+    except subprocess.TimeoutExpired:
+        _tool_result("timed out", "error")
+        return json.dumps({"error": "timeout", "findings": []})
+    except Exception as e:
+        _tool_result(f"error: {e}", "error")
+        return json.dumps({"error": str(e), "findings": []})
+
+
+@function_tool
+def run_wpscan(target):
+    """Scan WordPress installation for vulnerabilities, plugins, themes."""
+    url = _normalize_url(target)
+    _tool_call("run_wpscan", target=url)
+    wpscan_path = shutil.which("wpscan")
+    if not wpscan_path:
+        _tool_result("wpscan not installed", "error")
+        return json.dumps({"error": "not installed", "findings": []})
+    _tool_running("scanning WordPress")
+    cmd = [wpscan_path, "--url", url, "--format", "json", "--no-banner", "--random-user-agent"]
+    try:
+        result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
+        output = result.stdout or ""
+        try:
+            data = json.loads(output)
+            _tool_result(f"WordPress scan complete: {len(data.get('interesting_findings', []))} findings")
+            return json.dumps(data)
+        except json.JSONDecodeError:
+            _tool_result(f"Nikto output ({len(output)} chars)")
+            return json.dumps({"raw": output[:3000]})
+    except subprocess.TimeoutExpired:
+        _tool_result("timed out", "error")
+        return json.dumps({"error": "timeout"})
+    except Exception as e:
+        _tool_result(f"error: {e}", "error")
+        return json.dumps({"error": str(e)})
+
+
+@function_tool
+def run_searchsploit(query):
+    """Search local ExploitDB database for exploits matching a query.
+
+    Example: run_searchsploit("apache 2.4")
+    """
+    _tool_call("run_searchsploit", query=query)
+    sp_path = shutil.which("searchsploit")
+    if not sp_path:
+        _tool_result("searchsploit not installed", "error")
+        return json.dumps({"error": "not installed", "exploits": []})
+    _tool_running("searching exploits")
+    cmd = [sp_path, "-j", query]
+    try:
+        result = subprocess.run(cmd, timeout=30, **SUBPROCESS_KWARGS)
+        output = result.stdout or ""
+        try:
+            data = json.loads(output)
+            exploits = data.get("RESULTS_EXPLOIT", [])
+            _tool_result(f"Found {len(exploits)} exploits")
+            return json.dumps({"exploits": exploits[:10], "count": len(exploits)})
+        except json.JSONDecodeError:
+            _tool_result(f"Search done ({len(output)} chars)")
+            return json.dumps({"raw": output[:2000]})
+    except Exception as e:
+        _tool_result(f"error: {e}", "error")
+        return json.dumps({"error": str(e)})
+
+
+@function_tool
+def run_dns_lookup(domain, record_type="A"):
+    """DNS lookup for a domain. Types: A, AAAA, MX, TXT, NS, SOA, CNAME."""
+    domain = _normalize_domain(domain)
+    _tool_call("run_dns_lookup", domain=domain, type=record_type)
+    _tool_running("resolving DNS")
+    import socket
+    try:
+        if record_type == "A":
+            results = socket.getaddrinfo(domain, None, socket.AF_INET)
+            ips = list(set(r[4][0] for r in results))
+            _tool_result(f"Resolved {len(ips)} A records")
+            return json.dumps({"records": ips, "type": "A"})
+        elif record_type == "MX":
+            import subprocess as sp
+            r = sp.run(["nslookup", "-type=mx", domain], capture_output=True, text=True, timeout=10)
+            _tool_result("MX records retrieved")
+            return json.dumps({"raw": r.stdout, "type": "MX"})
+        else:
+            import subprocess as sp
+            r = sp.run(["nslookup", f"-type={record_type.lower()}", domain], capture_output=True, text=True, timeout=10)
+            _tool_result(f"{record_type} records retrieved")
+            return json.dumps({"raw": r.stdout, "type": record_type})
+    except Exception as e:
+        _tool_result(f"error: {e}", "error")
+        return json.dumps({"error": str(e)})
+
+
+@function_tool
+def check_security_headers(url):
+    """Check HTTP security headers (CSP, HSTS, X-Frame-Options, etc.)."""
+    if not url.startswith("http"):
+        url = _normalize_url(url)
+    _tool_call("check_security_headers", url=url)
+    _tool_running("checking security headers")
+    curl_path = shutil.which("curl") or shutil.which("curl.exe")
+    if not curl_path:
+        _tool_result("curl not installed", "error")
+        return json.dumps({"error": "curl not installed"})
+    cmd = [curl_path, "-s", "-I", "--max-time", "15", "-k", "-A",
+           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", url]
+    try:
+        result = subprocess.run(cmd, timeout=30, **SUBPROCESS_KWARGS)
+        headers_raw = result.stdout or ""
+        headers = {}
+        for line in headers_raw.split("\n"):
+            if ":" in line:
+                k, v = line.split(":", 1)
+                headers[k.strip().lower()] = v.strip()
+        security_headers = {
+            "content-security-policy": headers.get("content-security-policy", "MISSING"),
+            "strict-transport-security": headers.get("strict-transport-security", "MISSING"),
+            "x-frame-options": headers.get("x-frame-options", "MISSING"),
+            "x-content-type-options": headers.get("x-content-type-options", "MISSING"),
+            "referrer-policy": headers.get("referrer-policy", "MISSING"),
+            "permissions-policy": headers.get("permissions-policy", "MISSING"),
+        }
+        missing = [k for k, v in security_headers.items() if v == "MISSING"]
+        _tool_result(f"{len(missing)} security headers missing")
+        return json.dumps({"headers": security_headers, "missing": missing, "all_headers": headers})
+    except Exception as e:
+        _tool_result(f"error: {e}", "error")
+        return json.dumps({"error": str(e)})
+
+
+# ─── Tool registries ───────────────────────────────────────────────
+
 SECURITY_TOOLS = [
     run_nuclei,
     run_nmap,
@@ -426,6 +650,26 @@ SECURITY_TOOLS = [
     run_ffuf,
     run_curl,
     run_sqlmap,
+    read_file,
+    write_file,
+]
+
+EXPANDED_TOOLS = [
+    run_nuclei,
+    run_nmap,
+    run_subfinder,
+    run_httpx,
+    run_ffuf,
+    run_curl,
+    run_sqlmap,
+    run_whatweb,
+    run_nikto,
+    run_wpscan,
+    run_searchsploit,
+    run_dns_lookup,
+    check_security_headers,
+    store_evidence,
+    fetch_evidence,
     read_file,
     write_file,
 ]

@@ -243,8 +243,56 @@ def score(state, config):
 @click.option("--api-key", default=None, help="API key")
 @click.option("--config", default="config.yaml", help="Config file path")
 @click.option("--output", default="./results", help="Output directory")
+def swarm(target, provider, model, api_base, api_key, config, output):
+    """Run the multi-agent security swarm.
+
+    5 specialized agents work in parallel:
+      Coordinator -> Recon + Enum (parallel) -> Vuln -> Verify -> Report
+
+    Each finding is independently verified to eliminate false positives.
+    Raw tool output stored in SQLite evidence DB (context isolation).
+    CVE/OWASP/CAPEC lookup via RAG tools.
+    """
+
+    cfg = load_config(config)
+    model_cfg = resolve_model(provider, model, api_key, api_base, cfg)
+
+    console.print(Panel.fit(
+        f"[bold blue]CERT-In Pipeline -- Multi-Agent Swarm[/]\n"
+        f"Target: {target}\n"
+        f"Provider: {provider or 'custom'}\n"
+        f"Model: {model_cfg['name']}\n"
+        f"Agents: 5 (Recon, Enum, Vuln, Verify, Reporter)\n"
+        f"Tools: 17 security + 4 RAG\n"
+        f"Architecture: Parallel phases + Independent verification",
+        border_style="blue"
+    ))
+
+    console.print("[yellow]WARNING: Only scan targets you have authorization to test.[/]")
+    click.confirm("Do you have authorization to scan this target?", abort=True)
+
+    Path(output).mkdir(parents=True, exist_ok=True)
+    os.chdir(output)
+
+    from llm.orchestrator import run_swarm_sync
+    result = run_swarm_sync(target, model_cfg, console)
+
+    if result["status"] == "success":
+        console.print(f"\n[bold green]Swarm complete![/] {result['findings']} verified findings.")
+    else:
+        console.print(f"\n[yellow]Swarm completed. {result.get('error', '')}[/]")
+
+
+@cli.command()
+@click.option("--target", required=True, help="Target domain (e.g., example.com)")
+@click.option("--provider", default=None, help="Provider ID from providers.yaml")
+@click.option("--model", default=None, help="Model name for the provider")
+@click.option("--api-base", default=None, help="API base URL")
+@click.option("--api-key", default=None, help="API key")
+@click.option("--config", default="config.yaml", help="Config file path")
+@click.option("--output", default="./results", help="Output directory")
 def agent(target, provider, model, api_base, api_key, config, output):
-    """Run the security agent — merged mode (skills + tool execution).
+    """Run the security agent -- merged mode (skills + tool execution).
 
     The LLM reads skill instructions, runs security tools, analyzes results,
     and generates a CERT-In report. Combines live mode (skills) and agent
