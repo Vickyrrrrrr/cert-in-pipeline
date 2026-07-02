@@ -6,14 +6,18 @@ __pycache__/
 dist/
 build/
 
-# Results
+# Results and sessions
 results/
 *.json
 
-# Environment
+# Environment and secrets
 .env
 *.key
 
 # OS
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/
