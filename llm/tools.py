@@ -1,8 +1,8 @@
-"""Security agent tools — fixed configurations for real data collection.
+﻿"""Security agent tools â€” fixed configurations for real data collection.
 
 UX follows Claude Code pattern:
-  ● tool_name(arg="value")     ← compact one-liner when calling
-  ○ result summary              ← compact result when done
+  â— tool_name(arg="value")     â† compact one-liner when calling
+  â—‹ result summary              â† compact result when done
 """
 
 import subprocess
@@ -14,6 +14,15 @@ import time
 from pathlib import Path
 from agents import function_tool
 
+# All subprocess calls use this to avoid UnicodeDecodeError on Windows
+SUBPROCESS_KWARGS = {
+    "capture_output": True,
+    "text": True,
+    "encoding": "utf-8",
+    "errors": "replace",
+    "check": False,
+}
+
 # ANSI colors
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -24,7 +33,7 @@ YELLOW = "\033[33m"
 MAGENTA = "\033[35m"
 RESET = "\033[0m"
 
-# Global flag — set to False while tool is running, True when LLM is thinking
+# Global flag â€” set to False while tool is running, True when LLM is thinking
 # This lets the heartbeat spinner in agent.py know when to show/hide
 _thinking = True
 
@@ -36,7 +45,7 @@ def _set_thinking(val):
 
 
 def _tool_call(name, **kwargs):
-    """Print compact tool call like Claude Code: ● run_nuclei(target="...")"""
+    """Print compact tool call like Claude Code: â— run_nuclei(target="...")"""
     global _thinking
     _thinking = False  # Stop spinner
     # Clear the spinner line
@@ -45,20 +54,20 @@ def _tool_call(name, **kwargs):
     args = ", ".join(f'{k}="{v}"' if isinstance(v, str) else f'{k}={v}' for k, v in kwargs.items())
     if len(args) > 80:
         args = args[:77] + "..."
-    print(f"  {CYAN}●{RESET} {BOLD}{name}({RESET}{DIM}{args}{RESET}{BOLD}){RESET}", flush=True)
+    print(f"  {CYAN}â—{RESET} {BOLD}{name}({RESET}{DIM}{args}{RESET}{BOLD}){RESET}", flush=True)
 
 
 def _tool_result(msg, status="ok"):
-    """Print compact result: ○ Found 5 vulnerabilities"""
+    """Print compact result: â—‹ Found 5 vulnerabilities"""
     global _thinking
     _thinking = True  # Resume spinner for LLM thinking
-    icon = GREEN + "○" + RESET if status == "ok" else RED + "✗" + RESET if status == "error" else YELLOW + "○" + RESET
+    icon = GREEN + "â—‹" + RESET if status == "ok" else RED + "âœ—" + RESET if status == "error" else YELLOW + "â—‹" + RESET
     print(f"  {icon} {msg}", flush=True)
 
 
 def _tool_running(msg):
     """Print running status."""
-    print(f"  {DIM}⏳ {msg}...{RESET}", flush=True)
+    print(f"  {DIM}â³ {msg}...{RESET}", flush=True)
 
 
 def _normalize_url(target):
@@ -88,7 +97,7 @@ def run_nuclei(target: str, severity: str = "low,medium,high,critical") -> str:
     _tool_running("scanning for vulnerabilities")
     cmd = [nuclei_path, "-u", url, "-json", "-silent", "-severity", severity, "-timeout", "10"]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+        result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
         findings = []
         for line in result.stdout.strip().split("\n"):
             line = line.strip()
@@ -139,7 +148,7 @@ def run_nmap(target: str, scan_type: str = "-sV --top-ports 100") -> str:
     _tool_running("scanning ports")
     cmd = [nmap_path] + scan_type.split() + ["-oX", "-", domain]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+        result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
 
         # Parse XML to extract open ports
         open_ports = []
@@ -189,7 +198,7 @@ def run_subfinder(domain: str) -> str:
     _tool_running("enumerating subdomains")
     cmd = [subfinder_path, "-d", domain, "-silent"]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
+        result = subprocess.run(cmd, timeout=180, **SUBPROCESS_KWARGS)
         subs = [s.strip() for s in result.stdout.strip().split("\n") if s.strip()]
         if subs:
             _tool_result(f"Found {len(subs)} subdomains")
@@ -218,7 +227,7 @@ def run_httpx(target: str) -> str:
     _tool_running("probing HTTP service")
     cmd = [httpx_path, "-u", url, "-json", "-silent", "-status-code", "-title", "-tech-detect", "-follow-redirects"]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
         results = []
         for line in result.stdout.strip().split("\n"):
             line = line.strip()
@@ -234,7 +243,7 @@ def run_httpx(target: str) -> str:
             title = r.get("title", "no title")
             tech = r.get("tech", [])
             tech_str = ", ".join(tech[:5]) if tech else "unknown"
-            _tool_result(f"HTTP {status} — {title} — Tech: {tech_str}")
+            _tool_result(f"HTTP {status} â€” {title} â€” Tech: {tech_str}")
         else:
             _tool_result("No HTTP response received")
         return json.dumps({"results": results, "count": len(results)})
@@ -271,7 +280,7 @@ def run_ffuf(url: str, wordlist: str = "") -> str:
     _tool_running("fuzzing directories")
     cmd = [ffuf_path, "-u", url, "-w", wordlist, "-json", "-mc", "200,301,302,403", "-t", "40", "-timeout", "10"]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+        result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
         results = []
         for line in result.stdout.strip().split("\n"):
             line = line.strip()
@@ -319,7 +328,7 @@ def run_curl(url: str, method: str = "GET", headers: str = "") -> str:
                 cmd.extend(["-H", h])
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
         # Extract status line
         status_line = ""
         for line in result.stdout.split("\n"):
@@ -328,7 +337,7 @@ def run_curl(url: str, method: str = "GET", headers: str = "") -> str:
                 break
         body_size = len(result.stdout)
         if status_line:
-            _tool_result(f"{status_line} — {body_size} bytes")
+            _tool_result(f"{status_line} â€” {body_size} bytes")
         else:
             _tool_result(f"Got {body_size} bytes")
         return result.stdout
@@ -355,7 +364,7 @@ def run_sqlmap(url: str, params: str = "") -> str:
     if params:
         cmd.extend(params.split())
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+        result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
         # Check if SQLi found
         if "is vulnerable" in result.stdout.lower() or "sqlmap identified" in result.stdout.lower():
             _tool_result("SQL injection detected!")
@@ -410,3 +419,4 @@ SECURITY_TOOLS = [
     read_file,
     write_file,
 ]
+
