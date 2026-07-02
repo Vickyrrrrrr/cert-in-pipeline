@@ -487,11 +487,18 @@ def run_whatweb(target):
     url = _normalize_url(target)
     _tool_call("run_whatweb", target=url)
     whatweb_path = shutil.which("whatweb")
+    ruby_path = shutil.which("ruby")
+    # Check cloned repo if not in PATH
     if not whatweb_path:
+        cloned = os.path.join(os.path.expanduser("~"), "tools", "whatweb", "whatweb")
+        if os.path.exists(cloned) and ruby_path:
+            whatweb_path = cloned
+    if not whatweb_path or not ruby_path:
         _tool_result("whatweb not installed", "error")
         return json.dumps({"error": "not installed", "tech": []})
     _tool_running("fingerprinting technologies")
-    cmd = [whatweb_path, "-q", "--color=never", url]
+    cmd = [ruby_path, whatweb_path, "-q", "--color=never", url]
+    _tool_call("run_whatweb", cmd=cmd, target=url)
     try:
         result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
         output = result.stdout or ""
@@ -511,11 +518,21 @@ def run_nikto(target):
     url = _normalize_url(target)
     _tool_call("run_nikto", target=url)
     nikto_path = shutil.which("nikto")
+    perl_path = shutil.which("perl")
+    # Check cloned repo if not in PATH
+    if not nikto_path:
+        cloned = os.path.join(os.path.expanduser("~"), "tools", "nikto", "program", "nikto.pl")
+        if os.path.exists(cloned) and perl_path:
+            nikto_path = cloned
     if not nikto_path:
         _tool_result("nikto not installed", "error")
         return json.dumps({"error": "not installed", "findings": []})
     _tool_running("scanning with Nikto")
-    cmd = [nikto_path, "-h", url, "-Format", "json", "-nointeractive", "-timeout", "10"]
+    if perl_path and nikto_path.endswith(".pl"):
+        cmd = [perl_path, nikto_path, "-h", url, "-Format", "json", "-nointeractive", "-timeout", "10"]
+    else:
+        cmd = [nikto_path, "-h", url, "-Format", "json", "-nointeractive", "-timeout", "10"]
+    _tool_call("run_nikto", cmd=cmd, target=url)
     try:
         result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
         output = result.stdout or ""
@@ -574,11 +591,17 @@ def run_searchsploit(query):
     """
     _tool_call("run_searchsploit", query=query)
     sp_path = shutil.which("searchsploit")
+    # Check cloned repo
+    if not sp_path:
+        cloned = os.path.join(os.path.expanduser("~"), "tools", "exploitdb", "searchsploit")
+        if os.path.exists(cloned):
+            sp_path = cloned
     if not sp_path:
         _tool_result("searchsploit not installed", "error")
-        return json.dumps({"error": "not installed", "exploits": []})
+        return json.dumps({"error": "not installed", "exploits": [], "search_url": f"https://www.exploit-db.com/search?q={query}"})
     _tool_running("searching exploits")
     cmd = [sp_path, "-j", query]
+    _tool_call("run_searchsploit", cmd=cmd, query=query)
     try:
         result = subprocess.run(cmd, timeout=30, **SUBPROCESS_KWARGS)
         output = result.stdout or ""
