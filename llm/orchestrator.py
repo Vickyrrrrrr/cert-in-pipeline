@@ -623,25 +623,24 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     session_start = time.time()
     all_findings: list[Finding] = []
 
-    # ─── Phase 1: Recon + Enum (PARALLEL) ─────────────────────────
-    _phase(1, "recon + enumeration", "parallel")
+    # ─── Phase 1: Recon + Enum (sequential — avoids rate limits) ──
+    _phase(1, "recon + enumeration")
 
-    recon_prompt = f"Perform reconnaissance on: {target}\nStore all raw output with store_evidence(). Output ReconOutput."
-    enum_prompt = f"Perform enumeration on: {target}\nStore all raw output with store_evidence(). Output EnumOutput."
+    recon_prompt = f"Perform reconnaissance on: {target}\nStore all raw output with store_evidence(). Output JSON."
+    enum_prompt = f"Perform enumeration on: {target}\nStore all raw output with store_evidence(). Output JSON."
 
-    # Run in parallel — heartbeat spinner + tool output both visible
-    _start_heartbeat()
-    (recon_result, enum_result), phase1_time, _ = await _run_parallel(
-        [
-            (recon_agent, recon_prompt, 25, "recon"),
-            (enum_agent, enum_prompt, 25, "enum"),
-        ],
-        phase_label="",
+    # Run sequentially to avoid 429 rate limit errors
+    recon_result, _, _ = await _run_parallel(
+        [(recon_agent, recon_prompt, 25, "recon")],
+        phase_label="recon scanning",
     )
-    _stop_heartbeat()
+    enum_result, _, _ = await _run_parallel(
+        [(enum_agent, enum_prompt, 25, "enum")],
+        phase_label="enum scanning",
+    )
 
-    recon_out, recon_time = recon_result
-    enum_out, enum_time = enum_result
+    recon_out, recon_time = recon_result[0]
+    enum_out, enum_time = enum_result[0]
 
     # Parse JSON from agent text output
     recon_out = _parse_output(recon_out, ReconOutput)
