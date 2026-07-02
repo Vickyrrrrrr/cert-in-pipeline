@@ -53,7 +53,7 @@ def _heartbeat(stop_event):
     while not stop_event.wait(0.15):
         with _print_lock:
             elapsed = int(time.time() - start)
-            sys.stdout.write(f"\r  {DIM}{spinner[i % len(spinner)]} LLM thinking... ({elapsed}s){RESET}   ")
+            sys.stdout.write(f"\r  {DIM}{spinner[i % len(spinner)]} Argus watching... ({elapsed}s){RESET}   ")
             sys.stdout.flush()
         i += 1
     # Clear the spinner line
