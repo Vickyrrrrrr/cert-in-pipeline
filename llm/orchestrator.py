@@ -491,11 +491,11 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
 
     # Header
     _box(
-        f"{DIAMOND} CERT-In Swarm",
+        f"{DIAMOND} Argus",
         [
-            f"target  {DOT}  {target}",
+            f"the hundred-eyed sentinel {DOT} {target}",
             f"model   {DOT}  {model_config['name']}",
-            f"agents  {DOT}  5 (recon {ARROW_R} enum {ARROW_R} vuln {ARROW_R} verify {ARROW_R} report)",
+            f"agents  {DOT}  5 eyes (recon {ARROW_R} enum {ARROW_R} vuln {ARROW_R} verify {ARROW_R} report)",
             f"tools   {DOT}  17 security + 6 RAG",
             f"mode    {DOT}  {mode_label}",
         ],
@@ -638,7 +638,7 @@ Output ScanReport.
 
         # List findings
         if vulns:
-            print(f"\n  {BOLD}Findings:{RESET}", flush=True)
+            print(f"\n  {BOLD}Argus eyes found:{RESET}", flush=True)
             for i, v in enumerate(vulns, 1):
                 sev = v.severity.upper()
                 color = RED if sev == "CRITICAL" else YELLOW if sev in ("HIGH", "MEDIUM") else GREEN

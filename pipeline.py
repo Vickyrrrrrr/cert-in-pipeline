@@ -244,10 +244,10 @@ def score(state, config):
 @click.option("--config", default="config.yaml", help="Config file path")
 @click.option("--output", default="./results", help="Output directory")
 def swarm(target, provider, model, api_base, api_key, config, output):
-    """Run the multi-agent security swarm.
+    """Run Argus — the hundred-eyed sentinel.
 
-    5 specialized agents work in parallel:
-      Coordinator -> Recon + Enum (parallel) -> Vuln -> Verify -> Report
+    5 specialized agents (eyes) work in parallel:
+      recon + enum (parallel) -> vuln -> verify -> report
 
     Each finding is independently verified to eliminate false positives.
     Raw tool output stored in SQLite evidence DB (context isolation).
@@ -258,12 +258,12 @@ def swarm(target, provider, model, api_base, api_key, config, output):
     model_cfg = resolve_model(provider, model, api_key, api_base, cfg)
 
     console.print(Panel.fit(
-        f"[bold blue]CERT-In Pipeline -- Multi-Agent Swarm[/]\n"
+        f"[bold blue]Argus — the hundred-eyed sentinel[/]\n"
         f"Target: {target}\n"
         f"Provider: {provider or 'custom'}\n"
         f"Model: {model_cfg['name']}\n"
-        f"Agents: 5 (Recon, Enum, Vuln, Verify, Reporter)\n"
-        f"Tools: 17 security + 4 RAG\n"
+        f"Agents: 5 eyes (recon, enum, vuln, verify, reporter)\n"
+        f"Tools: 17 security + 6 RAG\n"
         f"Architecture: Parallel phases + Independent verification",
         border_style="blue"
     ))
