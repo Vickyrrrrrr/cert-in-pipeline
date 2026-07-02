@@ -83,27 +83,32 @@ def create_merged_agent(model_config: dict) -> Agent:
     client = AsyncOpenAI(base_url=api_base, api_key=api_key)
     model = OpenAIChatCompletionsModel(model=model_name, openai_client=client)
 
-    system_prompt = f"""You are an expert security analyst. Scan the target and report vulnerabilities.
+    system_prompt = f"""You are an expert security analyst. Scan the target and report ALL vulnerabilities.
 
 TOOLS: run_httpx, run_subfinder, run_nmap, run_nuclei, run_curl, run_ffuf, run_sqlmap, write_file
 
 WORKFLOW (follow exactly):
-1. run_httpx(target) — probe HTTP, detect tech
-2. run_subfinder(domain) — find subdomains
-3. run_nmap(target) — scan ports
-4. run_nuclei(target) — scan for vulnerabilities
-5. run_curl(url) — verify findings
-6. write_file("results/cert-in-report.json", report) — save report
-7. STOP — do NOT call any more tools after write_file
+1. run_httpx(target) — probe main target HTTP
+2. run_subfinder(domain) — find ALL subdomains
+3. run_nmap(target) — scan ports on main target
+4. run_nuclei(target) — scan main target for vulnerabilities
+5. For EACH interesting subdomain found (admin, api, dev, test, staging):
+   - run_curl(subdomain_url) — probe it
+   - run_nuclei(subdomain_url) — scan it for vulnerabilities
+6. run_curl(url) — verify any findings on any target
+7. write_file("results/cert-in-report.json", report) — save report with ALL findings from ALL targets
+8. STOP — do NOT call any more tools after write_file
 
 RULES:
 - Call ONE tool at a time (do NOT call multiple tools simultaneously)
-- Run each tool ONCE, then next
+- Scan ALL discovered subdomains, not just the main domain
+- Run each tool ONCE per target, then move to next
 - After write_file, respond with "Report saved." and STOP
 - If tool fails, continue to next
 - Only report VERIFIED vulnerabilities
 - Include POC curl command per vuln
 - Assign CVSS 3.1 scores
+- Include discovery_commands showing exactly how each vuln was found
 
 ANALYSIS GUIDELINES:
 - Check for: XSS, SQLi, SSRF, IDOR, path traversal, open redirects, CSRF, info disclosure
@@ -113,19 +118,16 @@ ANALYSIS GUIDELINES:
 - Flag services that shouldn't be public: MySQL, Redis, MongoDB, Docker API
 - Verify business logic: price manipulation, auth bypass, race conditions
 - WAF/CDN detection affects scan results
+- Test API endpoints (/api/, /graphql, /swagger)
+- Check for exposed dashboards (phpmyadmin, grafana, jenkins)
 
 REPORT JSON (save to results/cert-in-report.json):
 {{
   "target": "...",
   "executive_summary": "...",
   "vulnerability_summary": {{"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}},
-  "scan_commands_used": [
-    "httpx -u https://target -json -silent -status-code -title -tech-detect",
-    "subfinder -d target -silent",
-    "nmap -sV --top-ports 100 target",
-    "nuclei -u https://target -json -silent",
-    "curl -s -i -L -k https://target/path"
-  ],
+  "targets_scanned": ["main domain", "subdomain1", "subdomain2"],
+  "scan_commands_used": ["list of all commands run"],
   "vulnerabilities": [
     {{
       "title":"...",
@@ -133,16 +135,13 @@ REPORT JSON (save to results/cert-in-report.json):
       "cvss_vector":"CVSS:3.1/...",
       "cvss_score":9.8,
       "cwe":"CWE-XX",
-      "affected_component":"...",
+      "affected_component":"which target/subdomain",
       "description":"...",
       "impact":"...",
-      "discovery_method": "How this was found (e.g., 'Found via curl on admin subdomain discovered by subfinder')",
-      "discovery_commands": [
-        "subfinder -d inspedu.in  # found admin.inspedu.in",
-        "curl -s -i https://admin.inspedu.in  # confirmed no auth"
-      ],
-      "poc": "curl -s https://admin.inspedu.in",
-      "poc_expected_result": "What you should see if vulnerable",
+      "discovery_method": "How this was found",
+      "discovery_commands": ["exact commands used to discover this"],
+      "poc": "curl command to verify",
+      "poc_expected_result": "what you should see",
       "remediation": "specific fix"
     }}
   ]
@@ -233,7 +232,7 @@ Then STOP. Do not call any more tools after writing the report.
     heartbeat_thread.start()
 
     try:
-        result = Runner.run_sync(agent, prompt, max_turns=25)
+        result = Runner.run_sync(agent, prompt, max_turns=40)
 
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=1)
