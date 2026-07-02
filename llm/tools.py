@@ -291,18 +291,22 @@ def run_httpx(target):
 
 
 @function_tool
-def run_ffuf(url, wordlist=""):
-    """Fuzz directories. URL must contain FUZZ keyword."""
+def run_ffuf(url):
+    """Fuzz directories. URL must contain FUZZ keyword (e.g. https://target/FUZZ)."""
     _tool_call("run_ffuf", url=url)
     ffuf_path = shutil.which("ffuf")
     if not ffuf_path:
         _tool_result("ffuf not installed", "error")
         return json.dumps({"error": "not installed", "results": []})
+    wordlist = ""
+    for p in ["/usr/share/wordlists/dirb/common.txt",
+              os.path.join(os.environ.get("USERPROFILE", ""), "wordlists", "common.txt"),
+              "C:\\Users\\VICKY\\wordlists\\common.txt"]:
+        if os.path.exists(p):
+            wordlist = p
+            break
     if not wordlist:
-        wordlist_paths = ["/usr/share/wordlists/dirb/common.txt", os.path.join(os.environ.get("USERPROFILE", ""), "wordlists", "common.txt")]
-        wordlist = next((p for p in wordlist_paths if os.path.exists(p)), "")
-    if not wordlist:
-        _tool_result("no wordlist found", "error")
+        _tool_result("no wordlist found (install: apt install dirb or download common.txt)", "error")
         return json.dumps({"error": "no wordlist", "results": []})
     _tool_running("fuzzing directories")
     cmd = [ffuf_path, "-u", url, "-w", wordlist, "-json", "-mc", "200,301,302,403", "-t", "40", "-timeout", "10"]
