@@ -33,6 +33,12 @@ def _force_exit(signum, frame):
 
 signal.signal(signal.SIGINT, _force_exit)
 
+# Fix Windows console encoding
+if sys.platform == "win32":
+    os.system("")  # Enable ANSI/VT100 on Windows console
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import click
 import yaml
 from rich.console import Console

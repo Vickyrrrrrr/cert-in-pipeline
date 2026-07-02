@@ -220,6 +220,19 @@ def run_httpx(target: str) -> str:
     _tool_call("run_httpx", target=url)
 
     httpx_path = shutil.which("httpx")
+    # Make sure it's ProjectDiscovery httpx, not Python httpx library
+    if httpx_path:
+        try:
+            check = subprocess.run([httpx_path, "-version"], capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace")
+            if "projectdiscovery" not in (check.stdout + check.stderr).lower():
+                httpx_path = None
+        except Exception:
+            httpx_path = None
+    # Check ~/bin for pre-compiled binary
+    if not httpx_path:
+        bin_httpx = os.path.join(os.path.expanduser("~"), "bin", "httpx.exe" if sys.platform == "win32" else "httpx")
+        if os.path.exists(bin_httpx):
+            httpx_path = bin_httpx
     if not httpx_path:
         _tool_result("httpx not installed", "error")
         return json.dumps({"error": "not installed", "results": []})
