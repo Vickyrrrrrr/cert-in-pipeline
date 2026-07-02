@@ -1,0 +1,27 @@
+{
+  "hosts": [
+    {
+      "ip": "93.184.216.34",
+      "hostname": "testsite.example.com",
+      "ports": [
+        {"port": 80, "state": "open", "service": "http", "version": "nginx 1.18.0"},
+        {"port": 443, "state": "open", "service": "https", "version": "nginx 1.18.0"},
+        {"port": 22, "state": "open", "service": "ssh", "version": "OpenSSH 7.6p1 Ubuntu"},
+        {"port": 3306, "state": "open", "service": "mysql", "version": "MySQL 5.7.42"},
+        {"port": 6379, "state": "open", "service": "redis", "version": "Redis 6.0.16"},
+        {"port": 8080, "state": "open", "service": "http-proxy", "version": "Apache/2.4.29"}
+      ],
+      "os": "Linux 5.4.0 (Ubuntu)"
+    },
+    {
+      "ip": "93.184.216.35",
+      "hostname": "admin.testsite.example.com",
+      "ports": [
+        {"port": 80, "state": "open", "service": "http", "version": "nginx 1.18.0"},
+        {"port": 443, "state": "open", "service": "https", "version": "nginx 1.18.0"},
+        {"port": 22, "state": "open", "service": "ssh", "version": "OpenSSH 7.6p1"}
+      ],
+      "os": "Linux 5.4.0 (Ubuntu)"
+    }
+  ]
+}

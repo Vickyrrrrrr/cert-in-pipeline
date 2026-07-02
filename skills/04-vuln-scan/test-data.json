@@ -1,0 +1,105 @@
+{
+  "findings": [
+    {
+      "template_id": "git-config",
+      "template": "exposures/configs/git-config.yaml",
+      "host": "https://testsite.example.com",
+      "matched": "https://testsite.example.com/.git/config",
+      "type": "http",
+      "severity": "high",
+      "description": "Git repository configuration file is accessible",
+      "curl_command": "curl -s https://testsite.example.com/.git/config"
+    },
+    {
+      "template_id": "xss-reflected-search",
+      "template": "vulnerabilities/xss/xss-reflected.yaml",
+      "host": "https://testsite.example.com/search",
+      "matched": "https://testsite.example.com/search?q=<script>alert(1)</script>",
+      "type": "http",
+      "severity": "medium",
+      "description": "Reflected XSS detected in search parameter",
+      "curl_command": "curl -s 'https://testsite.example.com/search?q=<script>alert(1)</script>'"
+    },
+    {
+      "template_id": "env-file-exposure",
+      "template": "exposures/files/env-file.yaml",
+      "host": "https://testsite.example.com",
+      "matched": "https://testsite.example.com/.env",
+      "type": "http",
+      "severity": "high",
+      "description": ".env file is accessible, may contain credentials",
+      "curl_command": "curl -s https://testsite.example.com/.env"
+    },
+    {
+      "template_id": "tech-detect",
+      "template": "technologies/tech-detect.yaml",
+      "host": "https://testsite.example.com",
+      "matched": "nginx",
+      "type": "http",
+      "severity": "info",
+      "description": "Nginx web server detected",
+      "curl_command": "curl -sI https://testsite.example.com"
+    },
+    {
+      "template_id": "phpinfo-exposure",
+      "template": "exposures/files/phpinfo.yaml",
+      "host": "https://testsite.example.com",
+      "matched": "https://testsite.example.com/phpinfo.php",
+      "type": "http",
+      "severity": "medium",
+      "description": "phpinfo() page is accessible, leaks server configuration",
+      "curl_command": "curl -s https://testsite.example.com/phpinfo.php"
+    },
+    {
+      "template_id": "redis-unauth",
+      "template": "vulnerabilities/databases/redis-unauth.yaml",
+      "host": "testsite.example.com",
+      "matched": "redis on port 6379",
+      "type": "network",
+      "severity": "critical",
+      "description": "Redis server accessible without authentication",
+      "curl_command": "redis-cli -h testsite.example.com -p 6379 INFO"
+    },
+    {
+      "template_id": "mysql-version",
+      "template": "technologies/mysql-detect.yaml",
+      "host": "testsite.example.com",
+      "matched": "MySQL 5.7.42",
+      "type": "network",
+      "severity": "info",
+      "description": "MySQL version detected",
+      "curl_command": "nmap -sV -p 3306 testsite.example.com"
+    },
+    {
+      "template_id": "directory-listing",
+      "template": "misconfiguration/directory-listing.yaml",
+      "host": "https://testsite.example.com/backup/",
+      "matched": "Index of /backup/",
+      "type": "http",
+      "severity": "low",
+      "description": "Directory listing is enabled on /backup/",
+      "curl_command": "curl -s https://testsite.example.com/backup/"
+    },
+    {
+      "template_id": "wordpress-login",
+      "template": "technologies/wordpress-detect.yaml",
+      "host": "https://testsite.example.com",
+      "matched": "wp-login.php",
+      "type": "http",
+      "severity": "info",
+      "description": "WordPress login page detected",
+      "curl_command": "curl -s https://testsite.example.com/wp-login.php"
+    },
+    {
+      "template_id": "backup-file",
+      "template": "exposures/files/backup-file.yaml",
+      "host": "https://testsite.example.com",
+      "matched": "https://testsite.example.com/backup/database.sql",
+      "type": "http",
+      "severity": "high",
+      "description": "Database backup file is accessible",
+      "curl_command": "curl -s https://testsite.example.com/backup/database.sql | head -20"
+    }
+  ],
+  "stats": {"total": 10, "critical": 1, "high": 3, "medium": 2, "low": 1, "info": 3}
+}

@@ -1,0 +1,92 @@
+# CERT-In Vulnerability Pipeline Configuration
+
+# Target configuration
+target:
+  domain: "example.com"
+  scope:
+    - "*.example.com"
+  exclude: []
+
+# Model configuration (uses LiteLLM — supports 100+ providers)
+#
+# GLM API (Z.ai):
+#   name: "openai/glm-4-flash"
+#   api_base: "https://api.z.ai/api/paas/v4"
+#   api_key: "your-glm-api-key"
+#
+# Ollama (local):
+#   name: "ollama/qwen2.5:7b"
+#   api_base: "http://localhost:11434"
+#   api_key: "ollama"
+#
+# OpenAI:
+#   name: "gpt-4o"
+#   api_key: "your-openai-key"
+#
+# Anthropic:
+#   name: "claude-sonnet-4-20250514"
+#   api_key: "your-anthropic-key"
+
+model:
+  name: "openai/glm-4-flash"
+  api_base: "https://api.z.ai/api/paas/v4"
+  api_key: "your-glm-api-key"
+  temperature: 0.1
+  max_tokens: 16384
+  timeout: 180
+
+# Pipeline configuration
+pipeline:
+  mode: "live"  # "live" or "benchmark"
+  steps:
+    - "01-recon"
+    - "02-enumeration"
+    - "03-port-scan"
+    - "04-vuln-scan"
+    - "05-analysis"
+    - "06-severity"
+    - "07-exploitability"
+    - "08-report"
+    - "09-remediation"
+  output_dir: "./results"
+  state_file: "./results/state.json"
+
+# Tool configuration (for live mode — runs inside Docker sandbox)
+tools:
+  subfinder:
+    timeout: 300
+    threads: 10
+  httpx:
+    timeout: 60
+    threads: 50
+  nuclei:
+    templates: "nuclei-templates"
+    severity: ["critical", "high", "medium", "low", "info"]
+    timeout: 600
+  nmap:
+    scan_type: "-sV -sC --top-ports 1000"
+    timeout: 600
+  ffuf:
+    wordlist: "/usr/share/wordlists/dirb/common.txt"
+    threads: 40
+    timeout: 300
+
+# CERT-In reporting
+cert_in:
+  email: "vdisclose@cert-in.org.in"
+  pgp: true
+  policy_url: "https://www.cert-in.org.in/RVDCP.jsp"
+
+# Scoring weights (must sum to 1.0)
+scoring:
+  weights:
+    "01-recon": 0.10
+    "02-enumeration": 0.10
+    "03-port-scan": 0.10
+    "04-vuln-scan": 0.15
+    "05-analysis": 0.15
+    "06-severity": 0.10
+    "07-exploitability": 0.10
+    "08-report": 0.15
+    "09-remediation": 0.05
+  pass_threshold: 0.80

@@ -1,0 +1,26 @@
+{
+  "target": "testsite.example.com",
+  "subdomains": [
+    {"host": "admin.testsite.example.com", "ip": "93.184.216.35", "status": 200, "title": "Admin Panel - Login"},
+    {"host": "dev.testsite.example.com", "ip": "93.184.216.36", "status": 200, "title": "Development Server"},
+    {"host": "api.testsite.example.com", "ip": "93.184.216.37", "status": 200, "title": "API Documentation"},
+    {"host": "staging.testsite.example.com", "ip": "93.184.216.38", "status": 403, "title": "403 Forbidden"},
+    {"host": "mail.testsite.example.com", "ip": "93.184.216.39", "status": 200, "title": "Roundcube Webmail"},
+    {"host": "old.testsite.example.com", "ip": "93.184.216.40", "status": 200, "title": "Old Site - Deprecated"},
+    {"host": "blog.testsite.example.com", "ip": "93.184.216.41", "status": 200, "title": "Company Blog"},
+    {"host": "cdn.testsite.example.com", "ip": "93.184.216.42", "status": 200, "title": "CDN"}
+  ],
+  "directories": [
+    {"path": "/admin", "status": 200, "size": 4096},
+    {"path": "/.git/config", "status": 200, "size": 500},
+    {"path": "/.env", "status": 200, "size": 1200},
+    {"path": "/backup", "status": 200, "size": 50000000},
+    {"path": "/wp-admin", "status": 301, "size": 0},
+    {"path": "/api/v1/users", "status": 200, "size": 8000},
+    {"path": "/robots.txt", "status": 200, "size": 100},
+    {"path": "/sitemap.xml", "status": 200, "size": 5000},
+    {"path": "/config.php", "status": 200, "size": 300},
+    {"path": "/phpinfo.php", "status": 200, "size": 95000}
+  ],
+  "summary": {"total_subdomains": 8, "live": 7, "interesting": 4}
+}

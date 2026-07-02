@@ -1,0 +1,67 @@
+{
+  "findings": [
+    {
+      "id": "VULN-001",
+      "title": "Git repository configuration file accessible",
+      "confirmed": true,
+      "confidence": 0.95,
+      "poc": "curl -s https://testsite.example.com/.git/config",
+      "impact": "Source code and credentials may be leaked through the exposed git repository",
+      "cwe_id": "CWE-538"
+    },
+    {
+      "id": "VULN-002",
+      "title": "Reflected XSS in search parameter",
+      "confirmed": true,
+      "confidence": 0.95,
+      "poc": "curl -s 'https://testsite.example.com/search?q=%3Cscript%3Ealert(1)%3C/script%3E' | grep 'alert(1)'",
+      "impact": "Attacker can execute arbitrary JavaScript in victim's browser, steal session cookies",
+      "cwe_id": "CWE-79"
+    },
+    {
+      "id": "VULN-003",
+      "title": ".env file accessible",
+      "confirmed": true,
+      "confidence": 0.98,
+      "poc": "curl -s https://testsite.example.com/.env",
+      "impact": "Database credentials and API keys exposed, leading to full application compromise",
+      "cwe_id": "CWE-200"
+    },
+    {
+      "id": "VULN-005",
+      "title": "phpinfo() page accessible",
+      "confirmed": true,
+      "confidence": 0.9,
+      "poc": "curl -s https://testsite.example.com/phpinfo.php | grep 'PHP Version'",
+      "impact": "Server configuration details leaked, aids attacker in targeting known vulnerabilities",
+      "cwe_id": "CWE-200"
+    },
+    {
+      "id": "VULN-006",
+      "title": "Redis server accessible without authentication",
+      "confirmed": true,
+      "confidence": 0.98,
+      "poc": "redis-cli -h testsite.example.com -p 6379 INFO",
+      "impact": "Attacker can read/write data, execute commands via Lua, or use Redis as a proxy",
+      "cwe_id": "CWE-306"
+    },
+    {
+      "id": "VULN-008",
+      "title": "Directory listing enabled on /backup/",
+      "confirmed": true,
+      "confidence": 0.9,
+      "poc": "curl -s https://testsite.example.com/backup/ | grep 'Index of'",
+      "impact": "Backup files including database dumps are accessible to anyone",
+      "cwe_id": "CWE-548"
+    },
+    {
+      "id": "VULN-010",
+      "title": "Database backup file accessible",
+      "confirmed": true,
+      "confidence": 0.95,
+      "poc": "curl -s https://testsite.example.com/backup/database.sql | head -20",
+      "impact": "Database schema and potentially user data are leaked",
+      "cwe_id": "CWE-538"
+    }
+  ]
+}

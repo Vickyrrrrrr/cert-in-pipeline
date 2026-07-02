@@ -1,0 +1,36 @@
+{
+  "vulnerabilities": [
+    {
+      "id": "VULN-2026-001",
+      "title": "Redis Server Accessible Without Authentication",
+      "cwe": "CWE-306",
+      "cvss_score": 9.8,
+      "severity": "CRITICAL",
+      "affected_component": "testsite.example.com:6379"
+    },
+    {
+      "id": "VULN-2026-002",
+      "title": "Git Repository Exposed",
+      "cwe": "CWE-538",
+      "cvss_score": 9.1,
+      "severity": "CRITICAL",
+      "affected_component": "https://testsite.example.com/.git/config"
+    },
+    {
+      "id": "VULN-2026-003",
+      "title": ".env File Accessible",
+      "cwe": "CWE-200",
+      "cvss_score": 7.5,
+      "severity": "HIGH",
+      "affected_component": "https://testsite.example.com/.env"
+    },
+    {
+      "id": "VULN-2026-004",
+      "title": "Reflected XSS in Search Parameter",
+      "cwe": "CWE-79",
+      "cvss_score": 6.1,
+      "severity": "MEDIUM",
+      "affected_component": "https://testsite.example.com/search?q="
+    }
+  ]
+}

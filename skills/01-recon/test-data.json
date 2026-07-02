@@ -1,0 +1,30 @@
+{
+  "target": "testsite.example.com",
+  "dns": {
+    "a": ["93.184.216.34"],
+    "mx": ["mail.testsite.example.com"],
+    "txt": ["v=spf1 include:_spf.google.com ~all"],
+    "ns": ["ns1.example.com", "ns2.example.com"],
+    "cname": []
+  },
+  "ssl": {
+    "issuer": "R3",
+    "valid_from": "2025-09-01",
+    "valid_to": "2026-09-01",
+    "san": ["testsite.example.com", "www.testsite.example.com"],
+    "cipher": "TLS_AES_256_GCM_SHA384"
+  },
+  "headers": {
+    "server": "nginx/1.18.0",
+    "x-powered-by": "PHP/7.4.3",
+    "content-type": "text/html; charset=UTF-8",
+    "set-cookie": "PHPSESSID=abc123; path=/",
+    "x-content-type-options": "nosniff"
+  },
+  "whois": {
+    "registrar": "GoDaddy",
+    "created": "2015-03-10",
+    "updated": "2025-01-15",
+    "expires": "2027-03-10"
+  }
+}

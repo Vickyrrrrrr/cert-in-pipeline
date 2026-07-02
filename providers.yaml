@@ -1,0 +1,286 @@
+# Provider Catalog — Supported LLM Providers
+# Inspired by OpenCode's provider directory (https://opencode.ai/docs/providers)
+#
+# Usage in config.yaml:
+#   model:
+#     provider: "ollama"          # reference a provider by name
+#     name: "qwen2.5:7b"          # model name for that provider
+#     api_key: "ollama"           # override key (or use env var)
+#
+# Or use LiteLLM model prefix directly:
+#   model:
+#     name: "ollama/qwen2.5:7b"   # LiteLLM auto-detects provider
+#
+# Or via CLI:
+#   python pipeline.py live --target example.com --provider ollama --model qwen2.5:7b
+#   python pipeline.py live --target example.com --provider glm --model glm-4-flash --api-key YOUR_KEY
+
+providers:
+  # ─── Local Providers ───────────────────────────────────────────
+  ollama:
+    name: "Ollama (local)"
+    type: "openai-compatible"
+    base_url: "http://localhost:11434/v1"
+    api_key_env: "OLLAMA_API_KEY"
+    api_key_default: "ollama"
+    litellm_prefix: "ollama"
+    models:
+      - "qwen2.5:7b"
+      - "qwen2.5:7b-fast"
+      - "llama3.2:3b"
+      - "deepseek-r1:7b"
+      - "gemma2:9b"
+    notes: "No API key needed. Runs locally. Use host.docker.internal:11434 inside Docker."
+
+  lmstudio:
+    name: "LM Studio (local)"
+    type: "openai-compatible"
+    base_url: "http://127.0.0.1:1234/v1"
+    api_key_env: "LMSTUDIO_API_KEY"
+    api_key_default: "lm-studio"
+    litellm_prefix: "openai"
+    models:
+      - "google/gemma-3n-e4b"
+      - "meta-llama/llama-3.2-3b"
+    notes: "Open LM Studio, start the local server, then run the pipeline."
+
+  llamacpp:
+    name: "llama.cpp (local)"
+    type: "openai-compatible"
+    base_url: "http://127.0.0.1:8080/v1"
+    api_key_env: "LLAMACPP_API_KEY"
+    api_key_default: "llama"
+    litellm_prefix: "openai"
+    models:
+      - "qwen3-coder:a3b"
+      - "llama-3-8b"
+    notes: "Start llama-server with --server flag, then run the pipeline."
+
+  vllm:
+    name: "vLLM (local/cloud)"
+    type: "openai-compatible"
+    base_url: "http://localhost:8000/v1"
+    api_key_env: "VLLM_API_KEY"
+    api_key_default: "vllm"
+    litellm_prefix: "hosted_vllm"
+    models:
+      - "meta-llama/Llama-3-70B"
+      - "Qwen/Qwen2.5-72B"
+    notes: "vLLM exposes an OpenAI-compatible API. Set base_url to your vLLM server."
+
+  # ─── Cloud Providers (OpenAI-compatible) ──────────────────────
+  glm:
+    name: "GLM (Z.ai)"
+    type: "openai-compatible"
+    base_url: "https://api.z.ai/api/paas/v4"
+    api_key_env: "GLM_API_KEY"
+    litellm_prefix: "openai"
+    models:
+      - "glm-5.2"
+      - "glm-5-turbo"
+      - "glm-4-plus"
+      - "glm-4-air"
+      - "glm-4-flash"
+      - "glm-4-long"
+    notes: "Get API key from https://z.ai. OpenAI-compatible endpoint. GLM-5.2 is the latest."
+
+  bigmodel:
+    name: "BigModel (GLM China)"
+    type: "openai-compatible"
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    api_key_env: "BIGMODEL_API_KEY"
+    litellm_prefix: "openai"
+    models:
+      - "glm-5.2"
+      - "glm-5-turbo"
+      - "glm-4-plus"
+      - "glm-4-air"
+      - "glm-4-flash"
+    notes: "For users in China. Get API key from https://bigmodel.cn"
+
+  openai:
+    name: "OpenAI"
+    type: "openai"
+    base_url: "https://api.openai.com/v1"
+    api_key_env: "OPENAI_API_KEY"
+    litellm_prefix: "openai"
+    models:
+      - "gpt-4o"
+      - "gpt-4o-mini"
+      - "gpt-4-turbo"
+      - "o3-mini"
+    notes: "Get API key from https://platform.openai.com/api-keys"
+
+  deepseek:
+    name: "DeepSeek"
+    type: "openai-compatible"
+    base_url: "https://api.deepseek.com/v1"
+    api_key_env: "DEEPSEEK_API_KEY"
+    litellm_prefix: "deepseek"
+    models:
+      - "deepseek-chat"
+      - "deepseek-reasoner"
+      - "deepseek-coder"
+    notes: "Get API key from https://platform.deepseek.com"
+
+  groq:
+    name: "Groq"
+    type: "openai-compatible"
+    base_url: "https://api.groq.com/openai/v1"
+    api_key_env: "GROQ_API_KEY"
+    litellm_prefix: "groq"
+    models:
+      - "llama-3.3-70b-versatile"
+      - "llama-3.1-8b-instant"
+      - "mixtral-8x7b-32768"
+    notes: "Fastest inference. Get API key from https://console.groq.com"
+
+  together:
+    name: "Together AI"
+    type: "openai-compatible"
+    base_url: "https://api.together.xyz/v1"
+    api_key_env: "TOGETHER_API_KEY"
+    litellm_prefix: "together_ai"
+    models:
+      - "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+      - "Qwen/Qwen2.5-72B-Instruct-Turbo"
+      - "deepseek-ai/DeepSeek-V3"
+    notes: "Get API key from https://api.together.ai"
+
+  openrouter:
+    name: "OpenRouter"
+    type: "openai-compatible"
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: "OPENROUTER_API_KEY"
+    litellm_prefix: "openrouter"
+    models:
+      - "anthropic/claude-sonnet-4"
+      - "openai/gpt-4o"
+      - "google/gemini-2.0-flash"
+      - "moonshotai/kimi-k2"
+    notes: "Access 200+ models via one API. Get key from https://openrouter.ai"
+
+  fireworks:
+    name: "Fireworks AI"
+    type: "openai-compatible"
+    base_url: "https://api.fireworks.ai/inference/v1"
+    api_key_env: "FIREWORKS_API_KEY"
+    litellm_prefix: "fireworks_ai"
+    models:
+      - "accounts/fireworks/models/llama-v3p3-70b-instruct"
+      - "accounts/fireworks/models/qwen2p5-72b-instruct"
+    notes: "Get API key from https://app.fireworks.ai"
+
+  cerebras:
+    name: "Cerebras"
+    type: "openai-compatible"
+    base_url: "https://api.cerebras.ai/v1"
+    api_key_env: "CEREBRAS_API_KEY"
+    litellm_prefix: "cerebras"
+    models:
+      - "llama-3.3-70b"
+      - "qwen-3-coder-480b"
+    notes: "Ultra-fast inference. Get key from https://inference.cerebras.ai"
+
+  mistral:
+    name: "Mistral AI"
+    type: "openai-compatible"
+    base_url: "https://api.mistral.ai/v1"
+    api_key_env: "MISTRAL_API_KEY"
+    litellm_prefix: "mistral"
+    models:
+      - "mistral-large-latest"
+      - "mistral-small-latest"
+      - "codestral-latest"
+    notes: "Get API key from https://console.mistral.ai"
+
+  nvidia:
+    name: "NVIDIA NIM"
+    type: "openai-compatible"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    api_key_env: "NVIDIA_API_KEY"
+    litellm_prefix: "nvidia_nim"
+    models:
+      - "nvidia/llama-3.3-nemotron-super-49b"
+      - "meta/llama-3.3-70b-instruct"
+    notes: "Get API key from https://build.nvidia.com"
+
+  xai:
+    name: "xAI (Grok)"
+    type: "openai-compatible"
+    base_url: "https://api.x.ai/v1"
+    api_key_env: "XAI_API_KEY"
+    litellm_prefix: "xai"
+    models:
+      - "grok-3"
+      - "grok-3-mini"
+      - "grok-2"
+    notes: "Get API key from https://console.x.ai"
+
+  moonshot:
+    name: "Moonshot AI (Kimi)"
+    type: "openai-compatible"
+    base_url: "https://api.moonshot.cn/v1"
+    api_key_env: "MOONSHOT_API_KEY"
+    litellm_prefix: "moonshot"
+    models:
+      - "kimi-k2"
+      - "moonshot-v1-128k"
+    notes: "Get API key from https://platform.moonshot.ai"
+
+  minimax:
+    name: "MiniMax"
+    type: "openai-compatible"
+    base_url: "https://api.minimax.chat/v1"
+    api_key_env: "MINIMAX_API_KEY"
+    litellm_prefix: "minimax"
+    models:
+      - "MiniMax-Text-01"
+      - "abab6.5s-chat"
+    notes: "Get API key from https://platform.minimax.io"
+
+  huggingface:
+    name: "Hugging Face"
+    type: "openai-compatible"
+    base_url: "https://api-inference.huggingface.co"
+    api_key_env: "HUGGINGFACE_API_KEY"
+    litellm_prefix: "huggingface"
+    models:
+      - "meta-llama/Llama-3.3-70B-Instruct"
+      - "Qwen/Qwen2.5-72B-Instruct"
+    notes: "Get token from https://huggingface.co/settings/tokens"
+
+  # ─── Native SDK Providers ──────────────────────────────────────
+  anthropic:
+    name: "Anthropic (Claude)"
+    type: "anthropic"
+    base_url: null
+    api_key_env: "ANTHROPIC_API_KEY"
+    litellm_prefix: "anthropic"
+    models:
+      - "claude-sonnet-4-20250514"
+      - "claude-opus-4-20250514"
+      - "claude-haiku-4-20250414"
+    notes: "Get API key from https://platform.claude.com. Native SDK, no base_url needed."
+
+  bedrock:
+    name: "Amazon Bedrock"
+    type: "bedrock"
+    base_url: null
+    api_key_env: "AWS_ACCESS_KEY_ID"
+    litellm_prefix: "bedrock"
+    models:
+      - "anthropic.claude-sonnet-4-20250514-v1:0"
+      - "anthropic.claude-haiku-4-20250414-v1:0"
+    notes: "Requires AWS credentials. Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION."
+
+  vertex:
+    name: "Google Vertex AI"
+    type: "vertex"
+    base_url: null
+    api_key_env: "GOOGLE_APPLICATION_CREDENTIALS"
+    litellm_prefix: "vertex_ai"
+    models:
+      - "gemini-2.0-flash"
+      - "gemini-1.5-pro"
+    notes: "Requires Google Cloud credentials. Set GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS."

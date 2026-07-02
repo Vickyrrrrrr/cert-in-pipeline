@@ -1,0 +1,27 @@
+# CERT-In Vulnerability Pipeline — Docker Sandbox
+# Usage:
+#   docker-compose run pipeline benchmark --model openai/glm-4-flash
+#   docker-compose run pipeline live --target example.com --model openai/glm-4-flash
+
+services:
+  pipeline:
+    build: .
+    container_name: cert-in-pipeline
+    volumes:
+      # Mount results so they persist after container exits
+      - ./results:/pipeline/results
+      # Mount config for easy editing without rebuild
+      - ./config.yaml:/pipeline/config.yaml:ro
+      # Mount skills so you can edit prompts without rebuild
+      - ./skills:/pipeline/skills:ro
+    environment:
+      # GLM API (Z.ai) — set in .env file
+      - OPENAI_API_KEY=${GLM_API_KEY:-dummy}
+      - OPENAI_API_BASE=${GLM_API_BASE:-https://api.z.ai/api/paas/v4}
+      # Ollama (if using local model — host.docker.internal reaches host)
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    network_mode: bridge
+    stdin_open: true
+    tty: true

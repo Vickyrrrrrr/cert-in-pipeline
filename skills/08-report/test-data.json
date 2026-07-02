@@ -1,0 +1,38 @@
+{
+  "recon": {
+    "technologies": [{"name": "nginx", "version": "1.18.0"}, {"name": "PHP", "version": "7.4.3"}],
+    "attack_surface_summary": "nginx 1.18.0 with PHP 7.4.3. Missing CSP and HSTS headers."
+  },
+  "enumeration": {
+    "high_value_targets": [{"host": "admin.testsite.example.com", "reason": "Admin panel"}],
+    "sensitive_paths": [{"path": "/.git/config", "risk": "critical"}, {"path": "/.env", "risk": "critical"}]
+  },
+  "port_scan": {
+    "dangerous_exposures": [{"port": 3306, "service": "mysql"}, {"port": 6379, "service": "redis"}],
+    "attack_vectors": ["Redis exposed without auth", "MySQL exposed to internet"]
+  },
+  "analysis": {
+    "verified_findings": [
+      {"id": "VULN-001", "title": "Git repo accessible", "confirmed": true},
+      {"id": "VULN-002", "title": "XSS in search", "confirmed": true},
+      {"id": "VULN-003", "title": ".env accessible", "confirmed": true},
+      {"id": "VULN-006", "title": "Redis unauth", "confirmed": true}
+    ],
+    "stats": {"confirmed": 7, "false_positive": 3}
+  },
+  "severity": {
+    "scored_findings": [
+      {"id": "VULN-006", "title": "Redis unauth", "cvss_score": 9.8, "severity": "CRITICAL"},
+      {"id": "VULN-001", "title": "Git repo accessible", "cvss_score": 9.1, "severity": "CRITICAL"},
+      {"id": "VULN-003", "title": ".env accessible", "cvss_score": 7.5, "severity": "HIGH"},
+      {"id": "VULN-002", "title": "XSS in search", "cvss_score": 6.1, "severity": "MEDIUM"}
+    ]
+  },
+  "exploitability": {
+    "assessments": [
+      {"id": "VULN-006", "exploitable": true, "exploit_difficulty": "trivial"},
+      {"id": "VULN-001", "exploitable": true, "exploit_difficulty": "easy"},
+      {"id": "VULN-003", "exploitable": true, "exploit_difficulty": "trivial"}
+    ]
+  }
+}

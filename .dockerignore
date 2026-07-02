@@ -1,0 +1,7 @@
+# Exclude common non-target files
+.env
+*.pyc
+__pycache__/
+results/
+*.log
+.git
