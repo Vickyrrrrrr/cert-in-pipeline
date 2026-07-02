@@ -12,6 +12,14 @@ import threading
 from pathlib import Path
 from datetime import datetime
 
+# Fix Windows console encoding before any output
+if sys.platform == "win32":
+    os.system("chcp 65001 >nul 2>&1")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from agents import Agent, Runner, set_tracing_disabled
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI

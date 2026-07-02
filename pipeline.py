@@ -35,9 +35,13 @@ signal.signal(signal.SIGINT, _force_exit)
 
 # Fix Windows console encoding
 if sys.platform == "win32":
-    os.system("")  # Enable ANSI/VT100 on Windows console
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    os.system("chcp 65001 >nul 2>&1")  # Set console to UTF-8
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import click
 import yaml
