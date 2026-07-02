@@ -439,7 +439,8 @@ def _clear_spinner():
 
 
 async def _run_parallel(phases: list[tuple[Agent, str, int, str]], phase_label: str = "scanning"):
-    """Run multiple phases in parallel with a single combined spinner."""
+    """Run multiple phases in parallel. If phase_label is empty, no spinner (tool output shows progress)."""
+    use_spinner = bool(phase_label)
     stop_event = threading.Event()
     spinner = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
     start = time.time()
@@ -453,15 +454,17 @@ async def _run_parallel(phases: list[tuple[Agent, str, int, str]], phase_label: 
                 sys.stdout.flush()
             i += 1
 
-    spin_thread = threading.Thread(target=_spin, daemon=True)
-    spin_thread.start()
+    if use_spinner:
+        spin_thread = threading.Thread(target=_spin, daemon=True)
+        spin_thread.start()
 
     tasks = [_run_phase_silent(agent, prompt, max_turns) for agent, prompt, max_turns, _ in phases]
     results = await asyncio.gather(*tasks)
 
-    stop_event.set()
-    spin_thread.join(timeout=1)
-    _clear_spinner()
+    if use_spinner:
+        stop_event.set()
+        spin_thread.join(timeout=1)
+        _clear_spinner()
 
     elapsed = time.time() - start
     labels = [label for _, _, _, label in phases]
@@ -550,8 +553,9 @@ Run the PoC using run_curl and check if the expected result is observed.
 async def run_swarm(target: str, model_config: dict, console=None, provider_name: str = "") -> dict:
     """Run the full multi-agent security scan with clean output."""
 
-    # Suppress individual tool prints — orchestrator handles all output
-    set_quiet(True)
+    # Don't suppress tool output — user wants to see both agents working.
+    # _print_lock in tools.py ensures each line is atomic (no garbled output).
+    set_quiet(False)
 
     # Initialize evidence DB
     Path("results").mkdir(parents=True, exist_ok=True)
@@ -584,13 +588,13 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     recon_prompt = f"Perform reconnaissance on: {target}\nStore all raw output with store_evidence(). Output ReconOutput."
     enum_prompt = f"Perform enumeration on: {target}\nStore all raw output with store_evidence(). Output EnumOutput."
 
-    # Run with single combined spinner (not per-agent spinners — they conflict)
+    # Run in parallel — no spinner, tool output shows progress directly
     (recon_result, enum_result), phase1_time, _ = await _run_parallel(
         [
             (recon_agent, recon_prompt, 25, "recon"),
             (enum_agent, enum_prompt, 25, "enum"),
         ],
-        phase_label="recon + enum scanning",
+        phase_label="",
     )
 
     recon_out, recon_time = recon_result
