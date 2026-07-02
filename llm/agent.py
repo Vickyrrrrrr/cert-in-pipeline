@@ -119,8 +119,32 @@ REPORT JSON (save to results/cert-in-report.json):
   "target": "...",
   "executive_summary": "...",
   "vulnerability_summary": {{"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}},
+  "scan_commands_used": [
+    "httpx -u https://target -json -silent -status-code -title -tech-detect",
+    "subfinder -d target -silent",
+    "nmap -sV --top-ports 100 target",
+    "nuclei -u https://target -json -silent",
+    "curl -s -i -L -k https://target/path"
+  ],
   "vulnerabilities": [
-    {{"title":"...","severity":"CRITICAL|HIGH|MEDIUM|LOW","cvss_vector":"CVSS:3.1/...","cvss_score":9.8,"cwe":"CWE-XX","affected_component":"...","description":"...","impact":"...","poc":"curl ...","remediation":"specific fix"}}
+    {{
+      "title":"...",
+      "severity":"CRITICAL|HIGH|MEDIUM|LOW",
+      "cvss_vector":"CVSS:3.1/...",
+      "cvss_score":9.8,
+      "cwe":"CWE-XX",
+      "affected_component":"...",
+      "description":"...",
+      "impact":"...",
+      "discovery_method": "How this was found (e.g., 'Found via curl on admin subdomain discovered by subfinder')",
+      "discovery_commands": [
+        "subfinder -d inspedu.in  # found admin.inspedu.in",
+        "curl -s -i https://admin.inspedu.in  # confirmed no auth"
+      ],
+      "poc": "curl -s https://admin.inspedu.in",
+      "poc_expected_result": "What you should see if vulnerable",
+      "remediation": "specific fix"
+    }}
   ]
 }}
 
