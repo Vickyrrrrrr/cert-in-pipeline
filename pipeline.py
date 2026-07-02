@@ -275,7 +275,7 @@ def swarm(target, provider, model, api_base, api_key, config, output):
     os.chdir(output)
 
     from llm.orchestrator import run_swarm_sync
-    result = run_swarm_sync(target, model_cfg, console)
+    result = run_swarm_sync(target, model_cfg, console, provider or "")
 
     if result["status"] == "success":
         console.print(f"\n[bold green]Swarm complete![/] {result['findings']} verified findings.")

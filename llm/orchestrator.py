@@ -41,6 +41,7 @@ from llm.schemas import (
 )
 from llm import evidence
 from llm.rag import RAG_TOOLS
+from llm.interface import supports_structured_output
 
 set_tracing_disabled(True)
 
@@ -132,12 +133,16 @@ Your job: Discover the attack surface of the target.
 Store ALL raw output using store_evidence() — keep only evidence_ids in your response.
 DO NOT include raw tool output in your final answer — only structured data.
 
-You MUST output a valid ReconOutput with:
-  - subdomains: list of all discovered subdomains
-  - live_hosts: list of {host, status, title, tech}
-  - open_ports: list of {port, service, version}
-  - technologies: list of detected technologies
-  - summary: brief text summary
+After running all tools, output a JSON object with this exact structure:
+{
+  "subdomains": ["sub1.example.com", "sub2.example.com"],
+  "live_hosts": [{"host": "...", "status": 200, "title": "...", "tech": ["..."]}],
+  "open_ports": [{"port": 80, "service": "http", "version": "..."}],
+  "technologies": ["Apache", "WordPress"],
+  "dns_records": [{"type": "A", "value": "1.2.3.4"}],
+  "summary": "Brief text summary of attack surface"
+}
+Output ONLY the JSON, no other text.
 """
 
 ENUM_PROMPT = """You are the ENUMERATION agent in a security scanning swarm.
@@ -154,12 +159,15 @@ Your job: Find hidden paths, API endpoints, and sensitive files on the target.
 Store ALL raw output using store_evidence() — keep only evidence_ids.
 DO NOT include raw tool output in your final answer.
 
-You MUST output a valid EnumOutput with:
-  - directories: list of {path, status, size}
-  - api_endpoints: list of discovered API paths
-  - sensitive_files: list of exposed sensitive files found
-  - high_value_targets: targets that need deeper scanning
-  - summary: brief text summary
+After running all tools, output a JSON object with this exact structure:
+{
+  "directories": [{"path": "/admin", "status": 200, "size": 1234}],
+  "api_endpoints": ["/api/v1/users", "/api/v2/products"],
+  "sensitive_files": [".git/HEAD", ".env"],
+  "high_value_targets": ["admin.example.com", "api.example.com"],
+  "summary": "Brief text summary of enumeration findings"
+}
+Output ONLY the JSON, no other text.
 """
 
 VULN_PROMPT = """You are the VULNERABILITY SCANNER agent in a security scanning swarm.
@@ -181,7 +189,33 @@ For EACH vulnerability found, create a Finding with:
 Store ALL raw output using store_evidence() — keep only evidence_ids.
 DO NOT report findings without evidence_ref — they will be rejected.
 
-You MUST output a valid VulnOutput with findings list.
+After running all tools, output a JSON object with this exact structure:
+{
+  "findings": [
+    {
+      "id": "F-001",
+      "title": "Exposed Admin Panel",
+      "severity": "high",
+      "cwe": "CWE-284",
+      "owasp": "A01",
+      "cvss_score": 7.5,
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+      "affected_component": "https://target/admin",
+      "description": "Admin panel accessible without auth",
+      "impact": "Attacker can access admin functions",
+      "evidence_ref": "ev_abc123",
+      "discovery_method": "ffuf directory scan",
+      "discovery_commands": ["ffuf -u https://target/FUZZ -w common.txt"],
+      "poc": "curl -s https://target/admin",
+      "poc_expected_result": "HTTP 200 with admin login page",
+      "remediation": "Restrict admin panel to VPN or IP allowlist",
+      "verified": false
+    }
+  ],
+  "templates_run": 5000,
+  "summary": "Brief summary of scan results"
+}
+Output ONLY the JSON, no other text.
 """
 
 VERIFY_PROMPT = """You are the VERIFIER agent — an independent fact-checker.
@@ -199,7 +233,15 @@ For the finding you receive:
 Be SKEPTICAL. You are the last line of defense against false positives.
 A 404 page is NOT a vulnerability. A default page is NOT necessarily a vuln.
 
-You MUST output a valid VerifiedFinding.
+After verifying, output a JSON object with this exact structure:
+{
+  "finding_id": "F-001",
+  "verified": true,
+  "verification_output": "HTTP 200 confirmed, admin panel visible",
+  "false_positive": false,
+  "adjusted_severity": null
+}
+Output ONLY the JSON, no other text.
 """
 
 REPORTER_PROMPT = """You are the REPORTER agent for a CERT-In vulnerability assessment.
@@ -214,39 +256,138 @@ Rules:
   - Provide actionable remediation steps
   - Include all scan commands for reproducibility
 
-You MUST output a valid ScanReport.
+Output a JSON object with this exact structure:
+{
+  "target": "example.com",
+  "scan_timestamp": "2025-01-01T00:00:00",
+  "executive_summary": "Brief summary for management",
+  "targets_scanned": ["example.com", "sub.example.com"],
+  "scan_commands_used": ["nmap -sV target", "nuclei -u target"],
+  "vulnerability_summary": {"critical": 1, "high": 2, "medium": 3, "low": 1, "total": 7},
+  "vulnerabilities": [
+    {
+      "id": "F-001",
+      "title": "Exposed Admin Panel",
+      "severity": "high",
+      "cwe": "CWE-284",
+      "owasp": "A01",
+      "cvss_score": 7.5,
+      "cvss_vector": "CVSS:3.1/...",
+      "affected_component": "https://target/admin",
+      "description": "...",
+      "impact": "...",
+      "evidence_ref": "ev_123",
+      "discovery_method": "...",
+      "discovery_commands": ["..."],
+      "poc": "curl ...",
+      "poc_expected_result": "...",
+      "remediation": "...",
+      "verified": true
+    }
+  ],
+  "remediation_priority": ["Fix 1", "Fix 2"],
+  "cert_in_references": ["CERT-In advisory reference"]
+}
+Output ONLY the JSON, no other text.
 """
 
 
 # ─── Orchestrator ───────────────────────────────────────────────────
 
-def _create_agents(model_config: dict):
-    """Create all agents for the swarm."""
+def _create_agents(model_config: dict, provider_name: str = ""):
+    """Create all agents for the swarm.
+
+    Provider-aware: if the provider supports response_format + tools (OpenAI, GLM,
+    Anthropic, DeepSeek), we use Pydantic output_type on ALL agents (full hallucination
+    guard). If not (Groq, Ollama), output_type is only on the Reporter (no tools),
+    and tool-using agents get JSON format instructions in their prompt.
+
+    Tool count is minimized per agent — Groq struggles with 20+ tools.
+    """
     model = _make_model(model_config)
-    scan_tools = [t for t in EXPANDED_TOOLS if t.name not in ("read_file", "write_file")]
+    all_tools = {t.name: t for t in EXPANDED_TOOLS}
+    rag_tools = {t.name: t for t in RAG_TOOLS}
+
+    # Each agent gets only the tools it needs (keeps tool schema small for Groq)
+    recon_tool_names = ["run_subfinder", "run_nmap", "run_httpx", "run_whatweb", "run_dns_lookup", "store_evidence"]
+    enum_tool_names = ["run_ffuf", "run_curl", "check_security_headers", "run_wpscan", "store_evidence"]
+    vuln_tool_names = ["run_nuclei", "run_nikto", "run_sqlmap", "search_cve", "search_exploits", "search_knowledge", "store_evidence"]
+    verify_tool_names = ["run_curl", "fetch_evidence", "check_security_headers"]
+
+    recon_tools = [all_tools[n] for n in recon_tool_names if n in all_tools]
+    enum_tools = [all_tools[n] for n in enum_tool_names if n in all_tools]
+    vuln_tools = [all_tools[n] for n in vuln_tool_names if n in all_tools] + [rag_tools["search_cve"], rag_tools["search_exploits"], rag_tools["search_knowledge"]]
+    verify_tools = [all_tools[n] for n in verify_tool_names if n in all_tools]
+
+    structured = supports_structured_output(provider_name)
 
     recon_agent = Agent(
         name="Recon", instructions=RECON_PROMPT, model=model,
-        tools=scan_tools + RAG_TOOLS, output_type=ReconOutput,
+        tools=recon_tools,
+        **({"output_type": ReconOutput} if structured else {}),
     )
     enum_agent = Agent(
         name="Enum", instructions=ENUM_PROMPT, model=model,
-        tools=scan_tools, output_type=EnumOutput,
+        tools=enum_tools,
+        **({"output_type": EnumOutput} if structured else {}),
     )
     vuln_agent = Agent(
         name="VulnScan", instructions=VULN_PROMPT, model=model,
-        tools=scan_tools + RAG_TOOLS, output_type=VulnOutput,
+        tools=vuln_tools,
+        **({"output_type": VulnOutput} if structured else {}),
     )
     verify_agent = Agent(
         name="Verifier", instructions=VERIFY_PROMPT, model=model,
-        tools=[t for t in scan_tools if t.name in ("run_curl", "fetch_evidence", "check_security_headers")],
-        output_type=VerifiedFinding,
+        tools=verify_tools,
+        **({"output_type": VerifiedFinding} if structured else {}),
     )
     reporter_agent = Agent(
         name="Reporter", instructions=REPORTER_PROMPT, model=model,
-        output_type=ScanReport,
+        **({"output_type": ScanReport} if structured else {}),
     )
     return recon_agent, enum_agent, vuln_agent, verify_agent, reporter_agent
+
+
+def _parse_output(raw, model_class):
+    """Parse agent output into Pydantic model (handles both structured and text)."""
+    if raw is None:
+        return None
+    if isinstance(raw, model_class):
+        return raw
+    if isinstance(raw, str):
+        import re
+        text = raw.strip()
+
+        # Strip markdown code blocks
+        if "```json" in text:
+            start = text.index("```json") + 7
+            end = text.index("```", start) if "```" in text[start:] else len(text)
+            text = text[start:end].strip()
+        elif "```" in text:
+            start = text.index("```") + 3
+            end = text.index("```", start) if "```" in text[start:] else len(text)
+            text = text[start:end].strip()
+
+        # Try parsing as JSON directly
+        try:
+            return model_class.model_validate_json(text)
+        except Exception:
+            pass
+
+        # Try extracting the largest JSON object
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if json_match:
+            json_str = json_match.group(0)
+            try:
+                return model_class.model_validate_json(json_str)
+            except Exception:
+                # Try progressively smaller JSON objects
+                for i in range(len(json_str), 10, -1):
+                    try:
+                        return model_class.model_validate_json(json_str[:i])
+                    except Exception:
+                        continue
+    return None
 
 
 async def _run_phase(agent: Agent, prompt: str, max_turns: int = 25):
@@ -258,6 +399,8 @@ async def _run_phase(agent: Agent, prompt: str, max_turns: int = 25):
         return result.final_output, elapsed
     except Exception as e:
         elapsed = time.time() - start
+        err = str(e)[:200]
+        print(f"  {RED}{CROSS} error: {err}{RESET}", flush=True)
         return None, elapsed
 
 
@@ -303,7 +446,7 @@ def _vuln_summary(out: VulnOutput | None) -> str:
     return f"{n} findings ({sev_str})"
 
 
-async def _verify_finding(verify_agent: Agent, finding: Finding, semaphore: asyncio.Semaphore):
+async def _verify_finding(verify_agent: Agent, finding: Finding, semaphore: asyncio.Semaphore, structured: bool = True):
     """Verify a single finding using the Verifier agent."""
     async with semaphore:
         prompt = f"""Verify this finding by replaying its PoC:
@@ -318,6 +461,8 @@ Evidence ID: {finding.evidence_ref}
 Run the PoC using run_curl and check if the expected result is observed.
 """
         result, elapsed = await _run_phase(verify_agent, prompt, max_turns=5)
+        if not structured and result:
+            result = _parse_output(result, VerifiedFinding)
         if result and isinstance(result, VerifiedFinding):
             result.finding_id = finding.id
             status = f"{GREEN}{CHECK} verified{RESET}" if result.verified and not result.false_positive else f"{RED}{CROSS} false positive{RESET}"
@@ -328,7 +473,7 @@ Run the PoC using run_curl and check if the expected result is observed.
                                verification_output="Verification failed", false_positive=True)
 
 
-async def run_swarm(target: str, model_config: dict, console=None) -> dict:
+async def run_swarm(target: str, model_config: dict, console=None, provider_name: str = "") -> dict:
     """Run the full multi-agent security scan with clean output."""
 
     # Suppress individual tool prints — orchestrator handles all output
@@ -338,8 +483,11 @@ async def run_swarm(target: str, model_config: dict, console=None) -> dict:
     Path("results").mkdir(parents=True, exist_ok=True)
     evidence.init_db("results/evidence.db")
 
-    # Create agents
-    recon_agent, enum_agent, vuln_agent, verify_agent, reporter_agent = _create_agents(model_config)
+    # Create agents (provider-aware: structured output if supported)
+    recon_agent, enum_agent, vuln_agent, verify_agent, reporter_agent = _create_agents(model_config, provider_name)
+
+    structured = supports_structured_output(provider_name)
+    mode_label = "structured (Pydantic)" if structured else "fallback (JSON prompt)"
 
     # Header
     _box(
@@ -349,6 +497,7 @@ async def run_swarm(target: str, model_config: dict, console=None) -> dict:
             f"model   {DOT}  {model_config['name']}",
             f"agents  {DOT}  5 (recon {ARROW_R} enum {ARROW_R} vuln {ARROW_R} verify {ARROW_R} report)",
             f"tools   {DOT}  17 security + 6 RAG",
+            f"mode    {DOT}  {mode_label}",
         ],
     )
 
@@ -368,6 +517,11 @@ async def run_swarm(target: str, model_config: dict, console=None) -> dict:
 
     recon_out, recon_time = recon_result
     enum_out, enum_time = enum_result
+
+    # Parse fallback text output if not using structured output_type
+    if not structured:
+        recon_out = _parse_output(recon_out, ReconOutput)
+        enum_out = _parse_output(enum_out, EnumOutput)
 
     _phase_done("recon", recon_time, _recon_summary(recon_out))
     _phase_done("enum", enum_time, _enum_summary(enum_out))
@@ -396,6 +550,9 @@ Output VulnOutput.
 """
     vuln_out, vuln_time = await _run_phase(vuln_agent, vuln_prompt, max_turns=35)
 
+    if not structured:
+        vuln_out = _parse_output(vuln_out, VulnOutput)
+
     if vuln_out and hasattr(vuln_out, "findings"):
         all_findings = vuln_out.findings
 
@@ -406,7 +563,7 @@ Output VulnOutput.
         _phase(3, "verification", f"{len(all_findings)} findings, max 3 parallel")
 
         sem = asyncio.Semaphore(3)
-        verification_tasks = [_verify_finding(verify_agent, f, sem) for f in all_findings]
+        verification_tasks = [_verify_finding(verify_agent, f, sem, structured) for f in all_findings]
         verification_results = await asyncio.gather(*verification_tasks)
 
         verified_count = sum(1 for v in verification_results if v.verified and not v.false_positive)
@@ -444,6 +601,9 @@ Only include VERIFIED findings (verified=True, false_positive=False).
 Output ScanReport.
 """
     report_out, report_time = await _run_phase(reporter_agent, report_prompt, max_turns=15)
+
+    if not structured and report_out:
+        report_out = _parse_output(report_out, ScanReport)
 
     if report_out and isinstance(report_out, ScanReport):
         _phase_done("report", report_time, "generated")
@@ -496,8 +656,8 @@ Output ScanReport.
     return {"status": "completed", "report": None, "findings": len(verified_findings)}
 
 
-def run_swarm_sync(target: str, model_config: dict, console=None) -> dict:
+def run_swarm_sync(target: str, model_config: dict, console=None, provider_name: str = "") -> dict:
     """Synchronous wrapper for the async swarm."""
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    return asyncio.run(run_swarm(target, model_config, console))
+    return asyncio.run(run_swarm(target, model_config, console, provider_name))

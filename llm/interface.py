@@ -87,6 +87,22 @@ def resolve_model_config(provider_name: str, model_name: str, api_key: str = Non
     }
 
 
+# Providers that support response_format (JSON mode) + function calling together.
+# This determines whether we can use Pydantic output_type on tool-using agents.
+# Groq/Llama: does NOT support this combo (400 error: "json mode cannot be combined with tool/function calling")
+# OpenAI, GLM, Anthropic, DeepSeek: fully supported.
+_PROVIDERS_WITH_STRUCTURED_OUTPUT = {"openai", "glm", "bigmodel", "anthropic", "deepseek", "together", "fireworks", "mistral", "nvidia", "openrouter"}
+
+
+def supports_structured_output(provider_name: str) -> bool:
+    """Check if a provider supports response_format + tools simultaneously.
+
+    When True: orchestrator uses Pydantic output_type on ALL agents (full hallucination guard).
+    When False: output_type only on Reporter (no tools), tool agents use prompt-based JSON.
+    """
+    return provider_name in _PROVIDERS_WITH_STRUCTURED_OUTPUT
+
+
 class LLMInterface:
     """Unified LLM interface supporting 100+ providers via LiteLLM."""
 
