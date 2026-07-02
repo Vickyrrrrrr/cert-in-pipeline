@@ -1,8 +1,8 @@
 """Pydantic schemas for structured agent output — the #1 hallucination guard.
 
-Every agent MUST output a validated Pydantic model. The OpenAI Agents SDK
-won't finalize a run until the schema passes, so the LLM is forced to
-produce structured, evidence-bound findings instead of free-text hallucination.
+All models are strict JSON schema compatible (no bare dict, no Union).
+The OpenAI Agents SDK enforces these on every agent — the LLM cannot
+produce invalid output.
 """
 
 from __future__ import annotations
@@ -36,23 +36,55 @@ class Finding(BaseModel):
     verified: bool = Field(default=False, description="Whether a Verifier agent confirmed this")
 
 
+class LiveHost(BaseModel):
+    host: str = ""
+    status: int = 0
+    title: str = ""
+    tech: str = ""
+
+
+class OpenPort(BaseModel):
+    port: int = 0
+    service: str = ""
+    version: str = ""
+
+
+class DNSRecord(BaseModel):
+    type: str = ""
+    value: str = ""
+
+
+class Directory(BaseModel):
+    path: str = ""
+    status: int = 0
+    size: int = 0
+
+
+class VulnSummary(BaseModel):
+    critical: int = 0
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+    total: int = 0
+
+
 class ReconOutput(BaseModel):
     """Output schema for the Recon agent."""
 
     subdomains: list[str] = Field(default_factory=list, description="Discovered subdomains")
-    live_hosts: list[dict] = Field(default_factory=list, description="Live HTTP hosts with status+title")
-    open_ports: list[dict] = Field(default_factory=list, description="Open ports with service+version")
+    live_hosts: list[LiveHost] = Field(default_factory=list, description="Live HTTP hosts")
+    open_ports: list[OpenPort] = Field(default_factory=list, description="Open ports")
     technologies: list[str] = Field(default_factory=list, description="Detected tech stack")
-    dns_records: list[dict] = Field(default_factory=list, description="DNS records found")
+    dns_records: list[DNSRecord] = Field(default_factory=list, description="DNS records found")
     summary: str = Field(description="Brief summary of attack surface")
 
 
 class EnumOutput(BaseModel):
     """Output schema for the Enumeration agent."""
 
-    directories: list[dict] = Field(default_factory=list, description="Discovered paths with status codes")
+    directories: list[Directory] = Field(default_factory=list, description="Discovered paths")
     api_endpoints: list[str] = Field(default_factory=list, description="Discovered API endpoints")
-    sensitive_files: list[str] = Field(default_factory=list, description="Exposed sensitive files (.git, .env, etc.)")
+    sensitive_files: list[str] = Field(default_factory=list, description="Exposed sensitive files")
     high_value_targets: list[str] = Field(default_factory=list, description="Targets worth deeper scanning")
     summary: str = Field(description="Brief summary of enumeration findings")
 
@@ -83,7 +115,7 @@ class ScanReport(BaseModel):
     executive_summary: str = Field(description="Plain-English summary for management")
     targets_scanned: list[str] = Field(default_factory=list, description="All hosts/subdomains scanned")
     scan_commands_used: list[str] = Field(default_factory=list, description="All commands for reproducibility")
-    vulnerability_summary: dict = Field(default_factory=dict, description="Count by severity")
+    vulnerability_summary: VulnSummary = Field(default_factory=VulnSummary, description="Count by severity")
     vulnerabilities: list[Finding] = Field(default_factory=list, description="Only VERIFIED findings")
     remediation_priority: list[str] = Field(default_factory=list, description="Ordered fix recommendations")
     cert_in_references: list[str] = Field(default_factory=list, description="CERT-In advisory references")

@@ -34,18 +34,6 @@ from agents import Agent, Runner, set_tracing_disabled
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 
-# AgentOutputSchema with strict_json_schema=False — needed because our Pydantic
-# models use list[dict] which isn't valid for strict JSON schema mode.
-try:
-    from agents import AgentOutputSchema
-    def _output_type(model_class, structured: bool):
-        if not structured:
-            return {}
-        return {"output_type": AgentOutputSchema(model_class, strict_json_schema=False)}
-except ImportError:
-    def _output_type(model_class, structured: bool):
-        return {"output_type": model_class} if structured else {}
-
 from llm.tools import EXPANDED_TOOLS, set_quiet
 from llm.schemas import (
     ReconOutput, EnumOutput, VulnOutput, VerifiedFinding,
@@ -336,32 +324,32 @@ def _create_agents(model_config: dict, provider_name: str = ""):
     recon_agent = Agent(
         name="Recon", instructions=RECON_PROMPT, model=model,
         tools=recon_tools,
-        **_output_type(ReconOutput, structured),
+        **({"output_type": ReconOutput} if structured else {}),
     )
     enum_agent = Agent(
         name="Enum", instructions=ENUM_PROMPT, model=model,
         tools=enum_tools,
-        **_output_type(EnumOutput, structured),
+        **({"output_type": EnumOutput} if structured else {}),
     )
     vuln_agent = Agent(
         name="VulnScan", instructions=VULN_PROMPT, model=model,
         tools=vuln_tools,
-        **_output_type(VulnOutput, structured),
+        **({"output_type": VulnOutput} if structured else {}),
     )
     verify_agent = Agent(
         name="Verifier", instructions=VERIFY_PROMPT, model=model,
         tools=verify_tools,
-        **_output_type(VerifiedFinding, structured),
+        **({"output_type": VerifiedFinding} if structured else {}),
     )
     reporter_agent = Agent(
         name="Reporter", instructions=REPORTER_PROMPT, model=model,
-        **_output_type(ScanReport, structured),
+        **({"output_type": ScanReport} if structured else {}),
     )
     return recon_agent, enum_agent, vuln_agent, verify_agent, reporter_agent
 
 
 def _parse_output(raw, model_class):
-    """Parse agent output into Pydantic model (handles both structured and text)."""
+    """Parse agent output into Pydantic model (handles text, markdown, partial JSON)."""
     if raw is None:
         return None
     if isinstance(raw, model_class):
@@ -370,15 +358,18 @@ def _parse_output(raw, model_class):
         import re
         text = raw.strip()
 
-        # Strip markdown code blocks
-        if "```json" in text:
-            start = text.index("```json") + 7
-            end = text.index("```", start) if "```" in text[start:] else len(text)
-            text = text[start:end].strip()
-        elif "```" in text:
-            start = text.index("```") + 3
-            end = text.index("```", start) if "```" in text[start:] else len(text)
-            text = text[start:end].strip()
+        # Strip markdown code blocks: ```json ... ``` or ``` ... ```
+        if "```" in text:
+            parts = text.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                if part.startswith("{"):
+                    try:
+                        return model_class.model_validate_json(part)
+                    except Exception:
+                        continue
 
         # Try parsing as JSON directly
         try:
@@ -393,7 +384,7 @@ def _parse_output(raw, model_class):
             try:
                 return model_class.model_validate_json(json_str)
             except Exception:
-                # Try progressively smaller JSON objects
+                # Try progressively smaller JSON
                 for i in range(len(json_str), 10, -1):
                     try:
                         return model_class.model_validate_json(json_str[:i])
@@ -402,18 +393,85 @@ def _parse_output(raw, model_class):
     return None
 
 
-async def _run_phase(agent: Agent, prompt: str, max_turns: int = 25):
-    """Run a single phase agent. Returns (output, elapsed)."""
+async def _run_phase(agent: Agent, prompt: str, max_turns: int = 25, label: str = ""):
+    """Run a single phase agent with a live spinner. Returns (output, elapsed)."""
+    stop_event = threading.Event()
+    spinner = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
     start = time.time()
+
+    def _spin():
+        i = 0
+        while not stop_event.wait(0.15):
+            elapsed = int(time.time() - start)
+            with _print_lock:
+                sys.stdout.write(f"\r  {DIM}{spinner[i % len(spinner)]} {label}... ({elapsed}s){RESET}   ")
+                sys.stdout.flush()
+            i += 1
+
+    spin_thread = threading.Thread(target=_spin, daemon=True)
+    spin_thread.start()
+
     try:
         result = await Runner.run(agent, prompt, max_turns=max_turns)
         elapsed = time.time() - start
+        stop_event.set()
+        spin_thread.join(timeout=1)
+        _clear_spinner()
         return result.final_output, elapsed
     except Exception as e:
         elapsed = time.time() - start
+        stop_event.set()
+        spin_thread.join(timeout=1)
+        _clear_spinner()
         err = str(e)[:200]
         print(f"  {RED}{CROSS} error: {err}{RESET}", flush=True)
         return None, elapsed
+
+
+def _clear_spinner():
+    with _print_lock:
+        sys.stdout.write("\r" + " " * 70 + "\r")
+        sys.stdout.flush()
+
+
+async def _run_parallel(phases: list[tuple[Agent, str, int, str]], phase_label: str = "scanning"):
+    """Run multiple phases in parallel with a single combined spinner."""
+    stop_event = threading.Event()
+    spinner = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"
+    start = time.time()
+
+    def _spin():
+        i = 0
+        while not stop_event.wait(0.15):
+            elapsed = int(time.time() - start)
+            with _print_lock:
+                sys.stdout.write(f"\r  {DIM}{spinner[i % len(spinner)]} {phase_label}... ({elapsed}s){RESET}   ")
+                sys.stdout.flush()
+            i += 1
+
+    spin_thread = threading.Thread(target=_spin, daemon=True)
+    spin_thread.start()
+
+    tasks = [_run_phase_silent(agent, prompt, max_turns) for agent, prompt, max_turns, _ in phases]
+    results = await asyncio.gather(*tasks)
+
+    stop_event.set()
+    spin_thread.join(timeout=1)
+    _clear_spinner()
+
+    elapsed = time.time() - start
+    labels = [label for _, _, _, label in phases]
+    return results, elapsed, labels
+
+
+async def _run_phase_silent(agent: Agent, prompt: str, max_turns: int):
+    """Run agent without spinner (used in parallel mode). Returns (output, elapsed)."""
+    start = time.time()
+    try:
+        result = await Runner.run(agent, prompt, max_turns=max_turns)
+        return result.final_output, time.time() - start
+    except Exception as e:
+        return None, time.time() - start
 
 
 def _recon_summary(out: ReconOutput | None) -> str:
@@ -472,7 +530,7 @@ Evidence ID: {finding.evidence_ref}
 
 Run the PoC using run_curl and check if the expected result is observed.
 """
-        result, elapsed = await _run_phase(verify_agent, prompt, max_turns=5)
+        result, elapsed = await _run_phase(verify_agent, prompt, max_turns=5, label=f"verifying {finding.id}")
         if not structured and result:
             result = _parse_output(result, VerifiedFinding)
         if result and isinstance(result, VerifiedFinding):
@@ -523,8 +581,8 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     enum_prompt = f"Perform enumeration on: {target}\nStore all raw output with store_evidence(). Output EnumOutput."
 
     recon_result, enum_result = await asyncio.gather(
-        _run_phase(recon_agent, recon_prompt, max_turns=25),
-        _run_phase(enum_agent, enum_prompt, max_turns=25),
+        _run_phase(recon_agent, recon_prompt, max_turns=25, label="recon scanning"),
+        _run_phase(enum_agent, enum_prompt, max_turns=25, label="enum scanning"),
     )
 
     recon_out, recon_time = recon_result
@@ -560,7 +618,7 @@ For each target:
 Create a Finding for each vulnerability with evidence_ref pointing to stored evidence.
 Output VulnOutput.
 """
-    vuln_out, vuln_time = await _run_phase(vuln_agent, vuln_prompt, max_turns=35)
+    vuln_out, vuln_time = await _run_phase(vuln_agent, vuln_prompt, max_turns=35, label="vuln scanning")
 
     if not structured:
         vuln_out = _parse_output(vuln_out, VulnOutput)
@@ -572,9 +630,9 @@ Output VulnOutput.
 
     # ─── Phase 3: Independent Verification ────────────────────────
     if all_findings:
-        _phase(3, "verification", f"{len(all_findings)} findings, max 3 parallel")
+        _phase(3, "verification", f"{len(all_findings)} findings")
 
-        sem = asyncio.Semaphore(3)
+        sem = asyncio.Semaphore(1)  # serial verification — avoids GLM rate limits
         verification_tasks = [_verify_finding(verify_agent, f, sem, structured) for f in all_findings]
         verification_results = await asyncio.gather(*verification_tasks)
 
@@ -612,7 +670,7 @@ Targets scanned: {targets_to_scan}
 Only include VERIFIED findings (verified=True, false_positive=False).
 Output ScanReport.
 """
-    report_out, report_time = await _run_phase(reporter_agent, report_prompt, max_turns=15)
+    report_out, report_time = await _run_phase(reporter_agent, report_prompt, max_turns=15, label="generating report")
 
     if not structured and report_out:
         report_out = _parse_output(report_out, ScanReport)
