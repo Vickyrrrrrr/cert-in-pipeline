@@ -8,11 +8,12 @@ from pathlib import Path
 class CertInFormatter:
     """Formats pipeline results into CERT-In vulnerability disclosure report."""
 
-    SUBMISSION_EMAIL = "vdisclose@cert-in.org.in"
-    POLICY_URL = "https://www.cert-in.org.in/RVDCP.jsp"
-
-    def __init__(self, reporter_name: str = "", reporter_email: str = ""):
+    def __init__(self, reporter_name: str = "", reporter_email: str = "", 
+                 submission_email: str = "vdisclose@cert-in.org.in",
+                 policy_url: str = "https://www.cert-in.org.in/RVDCP.jsp"):
         self.reporter_name = reporter_name
+        self.SUBMISSION_EMAIL = submission_email
+        self.POLICY_URL = policy_url
         self.reporter_email = reporter_email
 
     def format_report(self, report_data: dict, target: str) -> dict:

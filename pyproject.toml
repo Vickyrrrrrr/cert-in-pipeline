@@ -12,6 +12,7 @@ dependencies = [
     "pyyaml>=6.0",
     "rich>=13.0.0",
     "click>=8.1.0",
+    "openai-agents>=0.17.7",
 ]
 
 [project.scripts]
