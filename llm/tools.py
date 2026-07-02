@@ -1,8 +1,7 @@
-﻿"""Security agent tools â€” fixed configurations for real data collection.
+﻿"""Security agent tools — each tool prints its execution live with colors.
 
-UX follows Claude Code pattern:
-  â— tool_name(arg="value")     â† compact one-liner when calling
-  â—‹ result summary              â† compact result when done
+Uses thread-safe printing with a lock shared with the heartbeat spinner.
+All Unicode chars use Python escape sequences for cross-platform reliability.
 """
 
 import subprocess
@@ -11,8 +10,12 @@ import json
 import os
 import sys
 import time
+import threading
 from pathlib import Path
 from agents import function_tool
+
+# Thread-safe printing lock (shared with heartbeat in agent.py)
+_print_lock = threading.Lock()
 
 # All subprocess calls use this to avoid UnicodeDecodeError on Windows
 SUBPROCESS_KWARGS = {
@@ -33,73 +36,84 @@ YELLOW = "\033[33m"
 MAGENTA = "\033[35m"
 RESET = "\033[0m"
 
-# Global flag â€” set to False while tool is running, True when LLM is thinking
-# This lets the heartbeat spinner in agent.py know when to show/hide
+# Unicode chars as escape sequences (cross-platform safe)
+DOT = "\u25cf"       # bullet
+CIRCLE = "\u25cb"    # circle
+CROSS = "\u2717"     # cross mark
+HOURGLASS = "\u23f3" # hourglass
+
+# Global flag for heartbeat
 _thinking = True
 
 
-def _set_thinking(val):
-    """Update the thinking flag."""
-    global _thinking
-    _thinking = val
+def _safe_print(msg):
+    """Thread-safe print."""
+    with _print_lock:
+        print(msg, flush=True)
+
+
+def _clear_line():
+    """Clear current line."""
+    with _print_lock:
+        sys.stdout.write("\r" + " " * 70 + "\r")
+        sys.stdout.flush()
 
 
 def _tool_call(name, **kwargs):
-    """Print compact tool call like Claude Code: â— run_nuclei(target="...")"""
+    """Print tool call: run_nuclei(target="...")"""
     global _thinking
-    _thinking = False  # Stop spinner
-    # Clear the spinner line
-    sys.stdout.write("\r" + " " * 60 + "\r")
-    sys.stdout.flush()
+    _thinking = False
+    _clear_line()
     args = ", ".join(f'{k}="{v}"' if isinstance(v, str) else f'{k}={v}' for k, v in kwargs.items())
     if len(args) > 80:
         args = args[:77] + "..."
-    print(f"  {CYAN}â—{RESET} {BOLD}{name}({RESET}{DIM}{args}{RESET}{BOLD}){RESET}", flush=True)
+    _safe_print(f"  {CYAN}{DOT}{RESET} {BOLD}{name}({RESET}{DIM}{args}{RESET}{BOLD}){RESET}")
 
 
 def _tool_result(msg, status="ok"):
-    """Print compact result: â—‹ Found 5 vulnerabilities"""
+    """Print result."""
     global _thinking
-    _thinking = True  # Resume spinner for LLM thinking
-    icon = GREEN + "â—‹" + RESET if status == "ok" else RED + "âœ—" + RESET if status == "error" else YELLOW + "â—‹" + RESET
-    print(f"  {icon} {msg}", flush=True)
+    _thinking = True
+    if status == "ok":
+        icon = f"{GREEN}{CIRCLE}{RESET}"
+    elif status == "error":
+        icon = f"{RED}{CROSS}{RESET}"
+    else:
+        icon = f"{YELLOW}{CIRCLE}{RESET}"
+    _safe_print(f"  {icon} {msg}")
 
 
 def _tool_running(msg):
     """Print running status."""
-    print(f"  {DIM}â³ {msg}...{RESET}", flush=True)
+    _safe_print(f"  {DIM}{HOURGLASS} {msg}...{RESET}")
 
 
 def _normalize_url(target):
-    """Ensure URL has protocol."""
     if not target.startswith("http://") and not target.startswith("https://"):
         return "https://" + target
     return target
 
 
 def _normalize_domain(target):
-    """Extract domain from URL."""
     domain = target.replace("https://", "").replace("http://", "")
     return domain.split("/")[0]
 
 
 @function_tool
-def run_nuclei(target: str, severity: str = "low,medium,high,critical") -> str:
+def run_nuclei(target, severity="low,medium,high,critical"):
     """Run nuclei vulnerability scanner against a target URL."""
     url = _normalize_url(target)
     _tool_call("run_nuclei", target=url, severity=severity)
-
     nuclei_path = shutil.which("nuclei")
     if not nuclei_path:
         _tool_result("nuclei not installed", "error")
-        return json.dumps({"error": "nuclei not installed", "findings": []})
-
+        return json.dumps({"error": "not installed", "findings": []})
     _tool_running("scanning for vulnerabilities")
     cmd = [nuclei_path, "-u", url, "-json", "-silent", "-severity", severity, "-timeout", "10"]
     try:
         result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
         findings = []
-        for line in result.stdout.strip().split("\n"):
+        for line in (result.stdout or "").strip().split("\n"):
             line = line.strip()
             if line and line.startswith("{"):
                 try:
@@ -115,112 +129,100 @@ def run_nuclei(target: str, severity: str = "low,medium,high,critical") -> str:
                     })
                 except json.JSONDecodeError:
                     continue
-
         if findings:
             by_sev = {}
             for f in findings:
                 s = f.get("severity", "info")
                 by_sev[s] = by_sev.get(s, 0) + 1
-            sev_str = ", ".join(f"{v} {k}" for k, v in sorted(by_sev.items(), key=lambda x: ["critical","high","medium","low","info"].index(x[0]) if x[0] in ["critical","high","medium","low","info"] else 5))
+            sev_str = ", ".join(f"{v} {k}" for k, v in sorted(by_sev.items()))
             _tool_result(f"Found {len(findings)} vulnerabilities ({sev_str})")
         else:
             _tool_result("No vulnerabilities found")
         return json.dumps({"findings": findings, "count": len(findings)})
     except subprocess.TimeoutExpired:
-        _tool_result("nuclei timed out (300s)", "error")
+        _tool_result("timed out", "error")
         return json.dumps({"error": "timeout", "findings": []})
     except Exception as e:
-        _tool_result(f"nuclei error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return json.dumps({"error": str(e), "findings": []})
 
 
 @function_tool
-def run_nmap(target: str, scan_type: str = "-sV --top-ports 100") -> str:
+def run_nmap(target, scan_type="-sV --top-ports 100"):
     """Run nmap port scanner against a target."""
     domain = _normalize_domain(target)
     _tool_call("run_nmap", target=domain, scan_type=scan_type)
-
     nmap_path = shutil.which("nmap")
     if not nmap_path:
         _tool_result("nmap not installed", "error")
-        return json.dumps({"error": "nmap not installed", "hosts": []})
-
+        return json.dumps({"error": "not installed", "ports": []})
     _tool_running("scanning ports")
     cmd = [nmap_path] + scan_type.split() + ["-oX", "-", domain]
     try:
         result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
-
-        # Parse XML to extract open ports
         open_ports = []
         try:
             import xml.etree.ElementTree as ET
-            root = ET.fromstring(result.stdout)
+            root = ET.fromstring(result.stdout or "")
             for port_elem in root.findall(".//port"):
                 state = port_elem.find("state")
                 if state is not None and state.get("state") == "open":
                     service = port_elem.find("service")
                     open_ports.append({
                         "port": int(port_elem.get("portid", 0)),
-                        "protocol": port_elem.get("protocol", ""),
                         "service": service.get("name", "") if service is not None else "",
                         "version": service.get("version", "") if service is not None else "",
                     })
-        except ET.ParseError:
+        except Exception:
             pass
-
         if open_ports:
             port_str = ", ".join(f"{p['port']}/{p['service']}" for p in open_ports[:10])
-            if len(open_ports) > 10:
-                port_str += f" (+{len(open_ports)-10} more)"
             _tool_result(f"Found {len(open_ports)} open ports: {port_str}")
         else:
-            _tool_result("No open ports found (host may be behind firewall/CDN)")
-        return json.dumps({"ports": open_ports, "raw_xml": result.stdout[:5000]})
+            _tool_result("No open ports found (host may be behind firewall)")
+        return json.dumps({"ports": open_ports, "raw_xml": (result.stdout or "")[:5000]})
     except subprocess.TimeoutExpired:
-        _tool_result("nmap timed out (300s)", "error")
+        _tool_result("timed out", "error")
         return json.dumps({"error": "timeout"})
     except Exception as e:
-        _tool_result(f"nmap error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return json.dumps({"error": str(e)})
 
 
 @function_tool
-def run_subfinder(domain: str) -> str:
-    """Find subdomains for a domain using subfinder."""
+def run_subfinder(domain):
+    """Find subdomains for a domain."""
     domain = _normalize_domain(domain)
     _tool_call("run_subfinder", domain=domain)
-
     subfinder_path = shutil.which("subfinder")
     if not subfinder_path:
         _tool_result("subfinder not installed", "error")
         return json.dumps({"error": "not installed", "subdomains": []})
-
     _tool_running("enumerating subdomains")
     cmd = [subfinder_path, "-d", domain, "-silent"]
     try:
         result = subprocess.run(cmd, timeout=180, **SUBPROCESS_KWARGS)
-        subs = [s.strip() for s in result.stdout.strip().split("\n") if s.strip()]
+        subs = [s.strip() for s in (result.stdout or "").strip().split("\n") if s.strip()]
         if subs:
             _tool_result(f"Found {len(subs)} subdomains")
         else:
             _tool_result("No subdomains found")
         return json.dumps({"subdomains": subs, "count": len(subs)})
     except subprocess.TimeoutExpired:
-        _tool_result("subfinder timed out", "error")
+        _tool_result("timed out", "error")
         return json.dumps({"error": "timeout", "subdomains": []})
     except Exception as e:
-        _tool_result(f"subfinder error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return json.dumps({"error": str(e), "subdomains": []})
 
 
 @function_tool
-def run_httpx(target: str) -> str:
+def run_httpx(target):
     """Probe HTTP services and detect technologies."""
     url = _normalize_url(target)
     _tool_call("run_httpx", target=url)
-
+    # Find ProjectDiscovery httpx (not Python httpx library)
     httpx_path = shutil.which("httpx")
-    # Make sure it's ProjectDiscovery httpx, not Python httpx library
     if httpx_path:
         try:
             check = subprocess.run([httpx_path, "-version"], capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace")
@@ -228,7 +230,6 @@ def run_httpx(target: str) -> str:
                 httpx_path = None
         except Exception:
             httpx_path = None
-    # Check ~/bin for pre-compiled binary
     if not httpx_path:
         bin_httpx = os.path.join(os.path.expanduser("~"), "bin", "httpx.exe" if sys.platform == "win32" else "httpx")
         if os.path.exists(bin_httpx):
@@ -236,76 +237,62 @@ def run_httpx(target: str) -> str:
     if not httpx_path:
         _tool_result("httpx not installed", "error")
         return json.dumps({"error": "not installed", "results": []})
-
     _tool_running("probing HTTP service")
     cmd = [httpx_path, "-u", url, "-json", "-silent", "-status-code", "-title", "-tech-detect", "-follow-redirects"]
     try:
         result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
         results = []
-        for line in result.stdout.strip().split("\n"):
+        for line in (result.stdout or "").strip().split("\n"):
             line = line.strip()
             if line and line.startswith("{"):
                 try:
                     results.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-
         if results:
             r = results[0]
             status = r.get("status_code", "?")
             title = r.get("title", "no title")
             tech = r.get("tech", [])
             tech_str = ", ".join(tech[:5]) if tech else "unknown"
-            _tool_result(f"HTTP {status} â€” {title} â€” Tech: {tech_str}")
+            _tool_result(f"HTTP {status} - {title} - Tech: {tech_str}")
         else:
-            _tool_result("No HTTP response received")
+            _tool_result("No HTTP response")
         return json.dumps({"results": results, "count": len(results)})
     except subprocess.TimeoutExpired:
-        _tool_result("httpx timed out", "error")
+        _tool_result("timed out", "error")
         return json.dumps({"error": "timeout", "results": []})
     except Exception as e:
-        _tool_result(f"httpx error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return json.dumps({"error": str(e), "results": []})
 
 
 @function_tool
-def run_ffuf(url: str, wordlist: str = "") -> str:
-    """Fuzz directories and files. URL must contain FUZZ keyword (e.g. https://target/FUZZ)."""
+def run_ffuf(url, wordlist=""):
+    """Fuzz directories. URL must contain FUZZ keyword."""
     _tool_call("run_ffuf", url=url)
-
     ffuf_path = shutil.which("ffuf")
     if not ffuf_path:
         _tool_result("ffuf not installed", "error")
         return json.dumps({"error": "not installed", "results": []})
-
-    # Try common wordlist paths
     if not wordlist:
-        wordlist_paths = [
-            "/usr/share/wordlists/dirb/common.txt",
-            os.path.join(os.environ.get("USERPROFILE", ""), "wordlists", "common.txt"),
-        ]
+        wordlist_paths = ["/usr/share/wordlists/dirb/common.txt", os.path.join(os.environ.get("USERPROFILE", ""), "wordlists", "common.txt")]
         wordlist = next((p for p in wordlist_paths if os.path.exists(p)), "")
-    
     if not wordlist:
-        _tool_result("no wordlist found (install dirb or specify path)", "error")
+        _tool_result("no wordlist found", "error")
         return json.dumps({"error": "no wordlist", "results": []})
-
     _tool_running("fuzzing directories")
     cmd = [ffuf_path, "-u", url, "-w", wordlist, "-json", "-mc", "200,301,302,403", "-t", "40", "-timeout", "10"]
     try:
         result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
         results = []
-        for line in result.stdout.strip().split("\n"):
+        for line in (result.stdout or "").strip().split("\n"):
             line = line.strip()
             if line and line.startswith("{"):
                 try:
                     data = json.loads(line)
                     if "input" in data:
-                        results.append({
-                            "path": data.get("input", {}).get("FUZZ", ""),
-                            "status": data.get("status", 0),
-                            "size": data.get("length", 0),
-                        })
+                        results.append({"path": data.get("input", {}).get("FUZZ", ""), "status": data.get("status", 0), "size": data.get("length", 0)})
                 except json.JSONDecodeError:
                     continue
         if results:
@@ -314,24 +301,23 @@ def run_ffuf(url: str, wordlist: str = "") -> str:
             _tool_result("No paths found")
         return json.dumps({"results": results, "count": len(results)})
     except subprocess.TimeoutExpired:
-        _tool_result("ffuf timed out", "error")
+        _tool_result("timed out", "error")
         return json.dumps({"error": "timeout", "results": []})
     except Exception as e:
-        _tool_result(f"ffuf error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return json.dumps({"error": str(e), "results": []})
 
 
 @function_tool
-def run_curl(url: str, method: str = "GET", headers: str = "") -> str:
+def run_curl(url, method="GET", headers=""):
     """Send an HTTP request to verify findings."""
-    url = _normalize_url(url) if not url.startswith("http") else url
+    if not url.startswith("http"):
+        url = _normalize_url(url)
     _tool_call("run_curl", method=method, url=url)
-
     curl_path = shutil.which("curl") or shutil.which("curl.exe")
     if not curl_path:
         _tool_result("curl not installed", "error")
         return "curl not installed"
-
     _tool_running("sending HTTP request")
     cmd = [curl_path, "-s", "-i", "-X", method, "--max-time", "30", "-L", "-k", url]
     if headers:
@@ -339,63 +325,58 @@ def run_curl(url: str, method: str = "GET", headers: str = "") -> str:
             h = h.strip()
             if h:
                 cmd.extend(["-H", h])
-
     try:
         result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
-        # Extract status line
         stdout = result.stdout or ""
         status_line = ""
         for line in stdout.split("\n"):
             if line.startswith("HTTP/"):
                 status_line = line.strip()
                 break
-        body_size = len(stdout)
         if status_line:
-            _tool_result(f"{status_line} â€” {body_size} bytes")
+            _tool_result(f"{status_line} - {len(stdout)} bytes")
         else:
-            _tool_result(f"Got {body_size} bytes")
-        return result.stdout
+            _tool_result(f"Got {len(stdout)} bytes")
+        return stdout
     except subprocess.TimeoutExpired:
-        _tool_result("curl timed out", "error")
+        _tool_result("timed out", "error")
         return "timeout"
     except Exception as e:
-        _tool_result(f"curl error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return f"Error: {e}"
 
 
 @function_tool
-def run_sqlmap(url: str, params: str = "") -> str:
-    """Test for SQL injection using sqlmap."""
+def run_sqlmap(url, params=""):
+    """Test for SQL injection."""
     _tool_call("run_sqlmap", url=url)
-
-    sqlmap_path = shutil.which("sqlmap") or shutil.which("sqlmap")
+    sqlmap_path = shutil.which("sqlmap")
     if not sqlmap_path:
         _tool_result("sqlmap not installed", "error")
         return json.dumps({"error": "not installed"})
-
     _tool_running("testing for SQL injection")
-    cmd = [sqlmap_path, "-u", url, "--batch", "--output-dir", "/tmp/sqlmap-output"]
+    cmd = [sqlmap_path, "-u", url, "--batch"]
     if params:
         cmd.extend(params.split())
     try:
         result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
-        # Check if SQLi found
-        if "is vulnerable" in result.stdout.lower() or "sqlmap identified" in result.stdout.lower():
+        output = (result.stdout or "") + (result.stderr or "")
+        if "is vulnerable" in output.lower() or "sqlmap identified" in output.lower():
             _tool_result("SQL injection detected!")
         else:
             _tool_result("No SQL injection detected")
-        return result.stdout + result.stderr
+        return output
     except subprocess.TimeoutExpired:
-        _tool_result("sqlmap timed out", "error")
+        _tool_result("timed out", "error")
         return "timeout"
     except Exception as e:
-        _tool_result(f"sqlmap error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return f"Error: {e}"
 
 
 @function_tool
-def read_file(path: str) -> str:
-    """Read the contents of a file."""
+def read_file(path):
+    """Read a file."""
     _tool_call("read_file", path=path)
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -403,12 +384,12 @@ def read_file(path: str) -> str:
         _tool_result(f"Read {len(content)} chars")
         return content
     except Exception as e:
-        _tool_result(f"read error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return f"Error: {e}"
 
 
 @function_tool
-def write_file(path: str, content: str) -> str:
+def write_file(path, content):
     """Write content to a file."""
     _tool_call("write_file", path=path, size=f"{len(content)} chars")
     try:
@@ -418,7 +399,7 @@ def write_file(path: str, content: str) -> str:
         _tool_result(f"Saved to {path}")
         return f"Successfully wrote to {path}"
     except Exception as e:
-        _tool_result(f"write error: {e}", "error")
+        _tool_result(f"error: {e}", "error")
         return f"Error: {e}"
 
 
@@ -433,4 +414,3 @@ SECURITY_TOOLS = [
     read_file,
     write_file,
 ]
-

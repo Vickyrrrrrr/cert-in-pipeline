@@ -16,7 +16,7 @@ from agents import Agent, Runner, set_tracing_disabled
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 
-from llm.tools import SECURITY_TOOLS, _normalize_url, _normalize_domain, _tool_call, _tool_result, _tool_running
+from llm.tools import SECURITY_TOOLS
 
 set_tracing_disabled(True)
 
@@ -31,24 +31,27 @@ RESET = "\033[0m"
 
 SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
-# Global flag — tools set this to False while running, True when LLM is thinking
-_thinking = True
+# Shared state for heartbeat
+_heartbeat_stop = None
+_heartbeat_thread = None
+_print_lock = threading.Lock()
 
 
 def _heartbeat(stop_event):
-    """Print a heartbeat every 5 seconds while LLM is thinking."""
-    import llm.tools as tools_mod
+    """Show spinner while LLM is thinking. Uses lock to avoid output conflicts."""
     spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     i = 0
     start = time.time()
-    while not stop_event.wait(0.1):
-        if tools_mod._thinking:
+    while not stop_event.wait(0.15):
+        with _print_lock:
             elapsed = int(time.time() - start)
-            sys.stdout.write(f"\r  {DIM}{spinner[i % len(spinner)]} Thinking... ({elapsed}s){RESET}    ")
+            sys.stdout.write(f"\r  {DIM}{spinner[i % len(spinner)]} LLM thinking... ({elapsed}s){RESET}   ")
             sys.stdout.flush()
-            i += 1
-    sys.stdout.write("\r" + " " * 60 + "\r")
-    sys.stdout.flush()
+        i += 1
+    # Clear the spinner line
+    with _print_lock:
+        sys.stdout.write("\r" + " " * 70 + "\r")
+        sys.stdout.flush()
 
 
 def _load_skill(name: str) -> str:
