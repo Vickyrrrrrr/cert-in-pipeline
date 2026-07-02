@@ -94,11 +94,12 @@ WORKFLOW (follow exactly):
 4. run_nuclei(target) — scan for vulnerabilities
 5. run_curl(url) — verify findings
 6. write_file("results/cert-in-report.json", report) — save report
-7. STOP
+7. STOP — do NOT call any more tools after write_file
 
 RULES:
+- Call ONE tool at a time (do NOT call multiple tools simultaneously)
 - Run each tool ONCE, then next
-- After write_file, STOP
+- After write_file, respond with "Report saved." and STOP
 - If tool fails, continue to next
 - Only report VERIFIED vulnerabilities
 - Include POC curl command per vuln
@@ -122,6 +123,8 @@ REPORT JSON (save to results/cert-in-report.json):
     {{"title":"...","severity":"CRITICAL|HIGH|MEDIUM|LOW","cvss_vector":"CVSS:3.1/...","cvss_score":9.8,"cwe":"CWE-XX","affected_component":"...","description":"...","impact":"...","poc":"curl ...","remediation":"specific fix"}}
   ]
 }}
+
+IMPORTANT: After calling write_file, do NOT call any more tools. Just say "Report saved." and stop.
 """
 
     agent = Agent(
