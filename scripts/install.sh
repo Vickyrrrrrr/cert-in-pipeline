@@ -1,103 +1,93 @@
 #!/bin/bash
-# CERT-In Pipeline — Linux/macOS Installer (uv)
-# Installs: uv, Python deps, Go, nuclei, subfinder, httpx, ffuf, nmap, sqlmap
-# Usage: chmod +x scripts/install.sh && ./scripts/install.sh
-
+# CERT-In Pipeline — One-liner install (Linux/macOS)
+#   curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/cert-in-pipeline/main/scripts/install.sh | bash
 set -e
 
+REPO="Vickyrrrrrr/cert-in-pipeline"
+BIN="${HOME}/.local/bin"
+mkdir -p "$BIN"
+
 echo "========================================"
-echo "  CERT-In Pipeline — Installer (Linux)"
+echo "  CERT-In Pipeline — Quick Install"
 echo "========================================"
 
-# ─── 1. Install uv ─────────────────────────────────────────────
-echo -e "\n[1/8] Installing uv (Python package manager)..."
-if ! command -v uv &> /dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-else
-    echo "  uv already installed — skipping"
+# ─── 1. Install uv ──────────────────────────────────────────────────
+echo -e "\n[1/5] Installing uv..."
+if ! command -v uv &>/dev/null; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
+echo "  uv $(uv --version 2>/dev/null || echo 'ok')"
 
-# ─── 2. Install Python dependencies ────────────────────────────
-echo -e "\n[2/8] Installing Python dependencies..."
+# ─── 2. Clone / pull repo ──────────────────────────────────────────
+echo -e "\n[2/5] Fetching cert-in-pipeline..."
+TARGET="${HOME}/cert-in-pipeline"
+if [ -d "$TARGET" ]; then
+  echo "  Already cloned at $TARGET"
+else
+  git clone --depth 1 "https://github.com/${REPO}.git" "$TARGET"
+fi
+cd "$TARGET"
+
+# ─── 3. Python deps ────────────────────────────────────────────────
+echo -e "\n[3/5] Installing Python dependencies..."
 uv sync
-echo "  Python deps installed"
+echo "  Python deps done"
 
-# ─── 3. Install Go ─────────────────────────────────────────────
-echo -e "\n[3/8] Installing Go..."
-if ! command -v go &> /dev/null; then
-    wget -q https://go.dev/dl/go1.22.0.linux-amd64.tar.gz -O /tmp/go.tar.gz
-    sudo tar -C /usr/local -xzf /tmp/go.tar.gz
-    export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
-    grep -q '/usr/local/go/bin' ~/.bashrc || echo 'export PATH=$PATH:/usr/local/go/bin:~/go/bin' >> ~/.bashrc
-else
-    echo "  Go already installed — skipping"
-fi
+# ─── 4. Pre-compiled security tools (no Go needed) ─────────────────
+echo -e "\n[4/5] Downloading nuclei, subfinder, httpx, ffuf..."
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64) ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+esac
+download() {
+  local repo="$1" name="$2" pattern="$3"
+  local exe="${BIN}/${name}"
+  [ -f "$exe" ] && echo "  $name already installed" && return
+  echo "  Fetching $name..."
+  local url=$(curl -sL "https://api.github.com/repos/${repo}/releases/latest" \
+    -H "User-Agent: cert-in-pipeline" \
+    | grep browser_download_url | grep -E "$pattern" | head -1 | cut -d'"' -f4)
+  [ -z "$url" ] && echo "  [SKIP] $name — no binary for ${OS}_${ARCH}" && return
+  local tmp="/tmp/${name}.tar.gz"
+  curl -sL "$url" -o "$tmp"
+  tar -xzf "$tmp" -C "$BIN" 2>/dev/null || unzip -o "$tmp" -d "$BIN" 2>/dev/null || true
+  chmod +x "$exe" 2>/dev/null || true
+  rm -f "$tmp"
+  [ -f "$exe" ] && echo "  [OK] $name" || echo "  [FAIL] $name"
+}
+download "projectdiscovery/nuclei"   "nuclei"    "${OS}_${ARCH}.*\.tar\.gz"
+download "projectdiscovery/subfinder" "subfinder" "${OS}_${ARCH}.*\.tar\.gz"
+download "projectdiscovery/httpx"    "httpx"     "${OS}_${ARCH}.*\.tar\.gz"
+download "ffuf/ffuf"                 "ffuf"      "${OS}_${ARCH}.*\.tar\.gz"
+export PATH="${BIN}:$PATH"
 
-# ─── 4. Install nmap ───────────────────────────────────────────
-echo -e "\n[4/8] Installing Nmap..."
-if ! command -v nmap &> /dev/null; then
-    sudo apt-get update -qq && sudo apt-get install -y -qq nmap
-else
-    echo "  Nmap already installed — skipping"
+# ─── 5. Nmap + sqlmap + nuclei templates ───────────────────────────
+echo -e "\n[5/5] Finishing up..."
+if ! command -v nmap &>/dev/null; then
+  if command -v brew &>/dev/null; then
+    brew install nmap 2>/dev/null || true
+  elif command -v apt-get &>/dev/null; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq nmap 2>/dev/null || true
+  fi
 fi
+uv pip install sqlmap --system 2>/dev/null || true
+command -v nuclei &>/dev/null && nuclei -update-templates 2>/dev/null || true
 
-# ─── 5. Install nuclei ─────────────────────────────────────────
-echo -e "\n[5/8] Installing nuclei..."
-if ! command -v nuclei &> /dev/null; then
-    go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-else
-    echo "  nuclei already installed — skipping"
-fi
-
-# ─── 6. Install subfinder ──────────────────────────────────────
-echo -e "\n[6/8] Installing subfinder..."
-if ! command -v subfinder &> /dev/null; then
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-else
-    echo "  subfinder already installed — skipping"
-fi
-
-# ─── 7. Install httpx + ffuf ───────────────────────────────────
-echo -e "\n[7/8] Installing httpx + ffuf..."
-if ! command -v httpx &> /dev/null; then
-    go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-else
-    echo "  httpx already installed — skipping"
-fi
-if ! command -v ffuf &> /dev/null; then
-    go install -v github.com/ffuf/ffuf/v2@latest
-else
-    echo "  ffuf already installed — skipping"
-fi
-
-# ─── 8. Install sqlmap + nuclei templates ──────────────────────
-echo -e "\n[8/8] Installing sqlmap + nuclei templates..."
-uv pip install sqlmap 2>/dev/null || pip install sqlmap 2>/dev/null
-if command -v nuclei &> /dev/null; then
-    nuclei -update-templates
-    echo "  Nuclei templates updated"
-fi
-
-# ─── Summary ───────────────────────────────────────────────────
+# ─── Summary ────────────────────────────────────────────────────────
 echo -e "\n========================================"
-echo "  Installation Complete"
+echo "  ✓ Installation Complete"
 echo "========================================"
-
-echo -e "\nInstalled tools:"
-for tool in uv python go nmap nuclei subfinder httpx ffuf sqlmap; do
-    if command -v $tool &> /dev/null; then
-        echo "  [OK] $tool"
-    else
-        echo "  [MISSING] $tool"
-    fi
+echo ""
+for tool in uv python3 nuclei subfinder httpx ffuf nmap sqlmap; do
+  command -v "$tool" &>/dev/null \
+    && echo "  [OK] $tool" \
+    || echo "  [MISSING] $tool"
 done
-
-echo -e "\nNext steps:"
-echo "  1. Restart your terminal (to pick up new PATH entries)"
-echo "  2. Set your API key:"
-echo "     export GLM_API_KEY='your-key'"
-echo "  3. Run benchmark:"
-echo "     uv run pipeline.py benchmark --provider glm --model glm-5.2"
-echo "  4. Run live scan:"
-echo "     uv run pipeline.py live --target example.com --provider glm --model glm-5.2"
+echo ""
+echo "Next:"
+echo "  cd ~/cert-in-pipeline"
+echo '  export API_KEY="your-key"'
+echo "  uv run pipeline.py agent --target example.com --provider glm --model glm-5-turbo"

@@ -1,10 +1,25 @@
 ﻿# CERT-In Pipeline - Windows Installer (pre-compiled binaries, no Go needed)
-# Usage: .\scripts\install.ps1
+# One-liner:
+#   curl -sSL https://raw.githubusercontent.com/Vickyrrrrrr/cert-in-pipeline/main/scripts/install.ps1 | powershell -c -
 
 $ErrorActionPreference = "Stop"
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  CERT-In Pipeline - Installer (Windows)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+
+# Ensure we're in the repo directory
+$repoDir = Join-Path $env:USERPROFILE 'cert-in-pipeline'
+if (-not (Test-Path (Join-Path $repoDir 'pipeline.py'))) {
+    Write-Host "Cloning cert-in-pipeline to $repoDir ..." -ForegroundColor Yellow
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        git clone --depth 1 https://github.com/Vickyrrrrrr/cert-in-pipeline.git $repoDir 2>$null
+    }
+    if (-not (Test-Path (Join-Path $repoDir 'pipeline.py'))) {
+        Write-Host "  Failed to clone repo" -ForegroundColor Red
+        exit 1
+    }
+}
+Set-Location $repoDir
 
 $binDir = Join-Path $env:USERPROFILE 'bin'
 if (-not (Test-Path $binDir)) {
