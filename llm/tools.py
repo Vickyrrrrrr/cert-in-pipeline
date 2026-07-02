@@ -300,8 +300,7 @@ def run_ffuf(url):
         return json.dumps({"error": "not installed", "results": []})
     wordlist = ""
     for p in ["/usr/share/wordlists/dirb/common.txt",
-              os.path.join(os.environ.get("USERPROFILE", ""), "wordlists", "common.txt"),
-              "C:\\Users\\VICKY\\wordlists\\common.txt"]:
+              os.path.join(os.environ.get("USERPROFILE", ""), "wordlists", "common.txt")]:
         if os.path.exists(p):
             wordlist = p
             break
