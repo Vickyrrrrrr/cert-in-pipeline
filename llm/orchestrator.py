@@ -675,8 +675,7 @@ Output VulnOutput.
     vuln_out, vuln_time = await _run_phase(vuln_agent, vuln_prompt, max_turns=35, label="")
     _stop_heartbeat()
 
-    if not structured:
-        vuln_out = _parse_output(vuln_out, VulnOutput)
+    vuln_out = _parse_output(vuln_out, VulnOutput)
 
     if vuln_out and hasattr(vuln_out, "findings"):
         all_findings = vuln_out.findings

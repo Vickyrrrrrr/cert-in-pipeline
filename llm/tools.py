@@ -380,6 +380,13 @@ def run_sqlmap(url, params=""):
     _tool_call("run_sqlmap", url=url)
     sqlmap_path = shutil.which("sqlmap")
     if not sqlmap_path:
+        # Check venv Scripts directory (uv pip install puts it here)
+        for p in [os.path.join(sys.prefix, "Scripts", "sqlmap.exe"),
+                  os.path.join(sys.prefix, "bin", "sqlmap")]:
+            if os.path.exists(p):
+                sqlmap_path = p
+                break
+    if not sqlmap_path:
         _tool_result("sqlmap not installed", "error")
         return json.dumps({"error": "not installed"})
     _tool_running("testing for SQL injection")
