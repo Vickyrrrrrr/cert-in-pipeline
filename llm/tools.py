@@ -59,8 +59,8 @@ def _clear_line():
         sys.stdout.flush()
 
 
-def _tool_call(name, **kwargs):
-    """Print tool call: run_nuclei(target="...")"""
+def _tool_call(name, cmd=None, **kwargs):
+    """Print tool call with actual command for reproducibility."""
     global _thinking
     _thinking = False
     _clear_line()
@@ -68,6 +68,12 @@ def _tool_call(name, **kwargs):
     if len(args) > 80:
         args = args[:77] + "..."
     _safe_print(f"  {CYAN}{DOT}{RESET} {BOLD}{name}({RESET}{DIM}{args}{RESET}{BOLD}){RESET}")
+    # Show actual command for reproducibility
+    if cmd:
+        cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+        if len(cmd_str) > 100:
+            cmd_str = cmd_str[:97] + "..."
+        _safe_print(f"  {DIM}  $ {cmd_str}{RESET}")
 
 
 def _tool_result(msg, status="ok"):
@@ -110,6 +116,7 @@ def run_nuclei(target, severity="low,medium,high,critical"):
         return json.dumps({"error": "not installed", "findings": []})
     _tool_running("scanning for vulnerabilities")
     cmd = [nuclei_path, "-u", url, "-json", "-silent", "-severity", severity, "-timeout", "10"]
+    _tool_call("run_nuclei", cmd=cmd, target=url, severity=severity)
     try:
         result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
         findings = []
@@ -158,6 +165,7 @@ def run_nmap(target, scan_type="-sV --top-ports 100"):
         return json.dumps({"error": "not installed", "ports": []})
     _tool_running("scanning ports")
     cmd = [nmap_path] + scan_type.split() + ["-oX", "-", domain]
+    _tool_call("run_nmap", cmd=cmd, target=domain, scan_type=scan_type)
     try:
         result = subprocess.run(cmd, timeout=300, **SUBPROCESS_KWARGS)
         open_ports = []
@@ -200,6 +208,7 @@ def run_subfinder(domain):
         return json.dumps({"error": "not installed", "subdomains": []})
     _tool_running("enumerating subdomains")
     cmd = [subfinder_path, "-d", domain, "-silent"]
+    _tool_call("run_subfinder", cmd=cmd, domain=domain)
     try:
         result = subprocess.run(cmd, timeout=180, **SUBPROCESS_KWARGS)
         subs = [s.strip() for s in (result.stdout or "").strip().split("\n") if s.strip()]
@@ -241,6 +250,7 @@ def run_httpx(target):
     cmd = [httpx_path, "-u", url, "-json", "-silent", "-status-code", "-title", "-tech-detect",
            "-follow-redirects", "-timeout", "15",
            "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"]
+    _tool_call("run_httpx", cmd=cmd, target=url)
     try:
         result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
         results = []
@@ -329,6 +339,7 @@ def run_curl(url, method="GET", headers=""):
             h = h.strip()
             if h:
                 cmd.extend(["-H", h])
+    _tool_call("run_curl", cmd=cmd, method=method, url=url)
     try:
         result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
         stdout = result.stdout or ""
