@@ -45,7 +45,6 @@ from llm.schemas import (
 )
 from llm import evidence
 from llm.rag import RAG_TOOLS
-from llm.interface import supports_structured_output
 
 set_tracing_disabled(True)
 
@@ -346,21 +345,18 @@ Output ONLY the JSON, no other text.
 def _create_agents(model_config: dict, provider_name: str = ""):
     """Create all agents for the swarm.
 
-    Provider-aware: if the provider supports response_format + tools (OpenAI, GLM,
-    Anthropic, DeepSeek), we use Pydantic output_type on ALL agents (full hallucination
-    guard). If not (Groq, Ollama), output_type is only on the Reporter (no tools),
-    and tool-using agents get JSON format instructions in their prompt.
-
-    Tool count is minimized per agent — Groq struggles with 20+ tools.
+    All agents use prompt-based JSON output (no output_type/response_format).
+    This is the pattern used by opencode, Claude Code — tools return structured
+    JSON, LLM returns free text with JSON, orchestrator parses it.
+    No response_format = no JSON parsing errors with any provider.
     """
     model = _make_model(model_config)
     all_tools = {t.name: t for t in EXPANDED_TOOLS}
     rag_tools = {t.name: t for t in RAG_TOOLS}
 
-    # Each agent gets only the tools it needs (keeps tool schema small for Groq)
     recon_tool_names = ["run_subfinder", "run_nmap", "run_httpx", "run_whatweb", "run_dns_lookup", "store_evidence"]
     enum_tool_names = ["run_ffuf", "run_curl", "check_security_headers", "run_wpscan", "store_evidence"]
-    vuln_tool_names = ["run_nuclei", "run_nikto", "run_sqlmap", "search_cve", "search_exploits", "search_knowledge", "store_evidence"]
+    vuln_tool_names = ["run_nuclei", "run_nikto", "run_sqlmap", "store_evidence"]
     verify_tool_names = ["run_curl", "fetch_evidence", "check_security_headers"]
 
     recon_tools = [all_tools[n] for n in recon_tool_names if n in all_tools]
@@ -368,32 +364,12 @@ def _create_agents(model_config: dict, provider_name: str = ""):
     vuln_tools = [all_tools[n] for n in vuln_tool_names if n in all_tools] + [rag_tools["search_cve"], rag_tools["search_exploits"], rag_tools["search_knowledge"]]
     verify_tools = [all_tools[n] for n in verify_tool_names if n in all_tools]
 
-    structured = supports_structured_output(provider_name)
+    recon_agent = Agent(name="Recon", instructions=RECON_PROMPT, model=model, tools=recon_tools)
+    enum_agent = Agent(name="Enum", instructions=ENUM_PROMPT, model=model, tools=enum_tools)
+    vuln_agent = Agent(name="VulnScan", instructions=VULN_PROMPT, model=model, tools=vuln_tools)
+    verify_agent = Agent(name="Verifier", instructions=VERIFY_PROMPT, model=model, tools=verify_tools)
+    reporter_agent = Agent(name="Reporter", instructions=REPORTER_PROMPT, model=model)
 
-    recon_agent = Agent(
-        name="Recon", instructions=RECON_PROMPT, model=model,
-        tools=recon_tools,
-        **({"output_type": ReconOutput} if structured else {}),
-    )
-    enum_agent = Agent(
-        name="Enum", instructions=ENUM_PROMPT, model=model,
-        tools=enum_tools,
-        **({"output_type": EnumOutput} if structured else {}),
-    )
-    vuln_agent = Agent(
-        name="VulnScan", instructions=VULN_PROMPT, model=model,
-        tools=vuln_tools,
-        **({"output_type": VulnOutput} if structured else {}),
-    )
-    verify_agent = Agent(
-        name="Verifier", instructions=VERIFY_PROMPT, model=model,
-        tools=verify_tools,
-        **({"output_type": VerifiedFinding} if structured else {}),
-    )
-    reporter_agent = Agent(
-        name="Reporter", instructions=REPORTER_PROMPT, model=model,
-        **({"output_type": ScanReport} if structured else {}),
-    )
     return recon_agent, enum_agent, vuln_agent, verify_agent, reporter_agent
 
 
@@ -592,7 +568,7 @@ def _vuln_summary(out: VulnOutput | None) -> str:
     return f"{n} findings ({sev_str})"
 
 
-async def _verify_finding(verify_agent: Agent, finding: Finding, semaphore: asyncio.Semaphore, structured: bool = True):
+async def _verify_finding(verify_agent: Agent, finding: Finding, semaphore: asyncio.Semaphore):
     """Verify a single finding using the Verifier agent."""
     async with semaphore:
         prompt = f"""Verify this finding by replaying its PoC:
@@ -607,7 +583,7 @@ Evidence ID: {finding.evidence_ref}
 Run the PoC using run_curl and check if the expected result is observed.
 """
         result, elapsed = await _run_phase(verify_agent, prompt, max_turns=5, label=f"verifying {finding.id}")
-        if not structured and result:
+        if result:
             result = _parse_output(result, VerifiedFinding)
         if result and isinstance(result, VerifiedFinding):
             result.finding_id = finding.id
@@ -630,11 +606,8 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     Path("results").mkdir(parents=True, exist_ok=True)
     evidence.init_db("results/evidence.db")
 
-    # Create agents (provider-aware: structured output if supported)
+    # Create agents
     recon_agent, enum_agent, vuln_agent, verify_agent, reporter_agent = _create_agents(model_config, provider_name)
-
-    structured = supports_structured_output(provider_name)
-    mode_label = "structured (Pydantic)" if structured else "fallback (JSON prompt)"
 
     # Header
     _box(
@@ -644,7 +617,6 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
             f"model   {DOT}  {model_config['name']}",
             f"agents  {DOT}  5 eyes (recon {ARROW_R} enum {ARROW_R} vuln {ARROW_R} verify {ARROW_R} report)",
             f"tools   {DOT}  17 security + 6 RAG",
-            f"mode    {DOT}  {mode_label}",
         ],
     )
 
@@ -671,10 +643,9 @@ async def run_swarm(target: str, model_config: dict, console=None, provider_name
     recon_out, recon_time = recon_result
     enum_out, enum_time = enum_result
 
-    # Parse fallback text output if not using structured output_type
-    if not structured:
-        recon_out = _parse_output(recon_out, ReconOutput)
-        enum_out = _parse_output(enum_out, EnumOutput)
+    # Parse JSON from agent text output
+    recon_out = _parse_output(recon_out, ReconOutput)
+    enum_out = _parse_output(enum_out, EnumOutput)
 
     _phase_done("recon", recon_time, _recon_summary(recon_out))
     _phase_done("enum", enum_time, _enum_summary(enum_out))
@@ -718,7 +689,7 @@ Output VulnOutput.
         _phase(3, "verification", f"{len(all_findings)} findings")
 
         sem = asyncio.Semaphore(1)  # serial verification — avoids GLM rate limits
-        verification_tasks = [_verify_finding(verify_agent, f, sem, structured) for f in all_findings]
+        verification_tasks = [_verify_finding(verify_agent, f, sem) for f in all_findings]
         verification_results = await asyncio.gather(*verification_tasks)
 
         verified_count = sum(1 for v in verification_results if v.verified and not v.false_positive)
@@ -757,13 +728,12 @@ Output ScanReport.
 """
     report_out, report_time = await _run_phase(reporter_agent, report_prompt, max_turns=15, label="generating report")
 
-    if not structured and report_out:
-        report_out = _parse_output(report_out, ScanReport)
+    report_out = _parse_output(report_out, ScanReport)
 
     if report_out and isinstance(report_out, ScanReport):
         _phase_done("report", report_time, "generated")
     else:
-        _phase_done("report", report_time, "fallback (no structured output)")
+        _phase_done("report", report_time, "no structured output")
 
     # ─── Summary ──────────────────────────────────────────────────
     total_time = time.time() - session_start

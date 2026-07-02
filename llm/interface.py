@@ -87,20 +87,21 @@ def resolve_model_config(provider_name: str, model_name: str, api_key: str = Non
     }
 
 
-# Providers that support response_format (JSON mode) + function calling together.
-# NOTE: GLM claims to support response_format but in practice wraps JSON in
-# markdown code blocks and truncates output. Moving to fallback for reliability.
-# OpenAI is the only provider that reliably supports strict structured output + tools.
-_PROVIDERS_WITH_STRUCTURED_OUTPUT = {"openai"}
+# No providers use structured output mode — it causes JSON parsing errors
+# with GLM (markdown wrapping, truncation) and Groq (tool_use_failed).
+# Instead, ALL agents use prompt-based JSON + _parse_output() fallback.
+# This is the pattern used by opencode, Claude Code, and other production agents.
+_PROVIDERS_WITH_STRUCTURED_OUTPUT = set()
 
 
 def supports_structured_output(provider_name: str) -> bool:
-    """Check if a provider supports response_format + tools simultaneously.
+    """Always False — we use prompt-based JSON for all providers.
 
-    When True: orchestrator uses Pydantic output_type on ALL agents (full hallucination guard).
-    When False: output_type only on Reporter (no tools), tool agents use prompt-based JSON.
+    This is the reliable pattern: tools return structured JSON (Python-generated),
+    LLM returns free text with JSON, _parse_output() extracts it.
+    No response_format, no strict schema, no parsing errors.
     """
-    return provider_name in _PROVIDERS_WITH_STRUCTURED_OUTPUT
+    return False
 
 
 class LLMInterface:
