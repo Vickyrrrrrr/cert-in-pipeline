@@ -226,22 +226,23 @@ def score(state, config):
 @click.option("--config", default="config.yaml", help="Config file path")
 @click.option("--output", default="./results", help="Output directory")
 def agent(target, provider, model, api_base, api_key, config, output):
-    """Run an autonomous security agent with tool execution.
+    """Run the security agent — merged mode (skills + tool execution).
 
-    The LLM autonomously decides which tools to run (nuclei, nmap, subfinder, etc.),
-    analyzes results, and generates a CERT-In report.
+    The LLM reads skill instructions, runs security tools, analyzes results,
+    and generates a CERT-In report. Combines live mode (skills) and agent
+    mode (tool execution) into one unified workflow.
     """
 
     cfg = load_config(config)
     model_cfg = resolve_model(provider, model, api_key, api_base, cfg)
 
     console.print(Panel.fit(
-        f"[bold magenta]CERT-In Pipeline — Agent Mode[/]\n"
+        f"[bold magenta]CERT-In Pipeline — Agent (Merged Mode)[/]\n"
         f"Target: {target}\n"
         f"Provider: {provider or 'custom'}\n"
         f"Model: {model_cfg['name']}\n"
-        f"API Base: {model_cfg['api_base'] or '(default)'}\n"
-        f"\n[dim]The LLM will autonomously run security tools.[/]",
+        f"Skills: 9 loaded\n"
+        f"Tools: 9 available",
         border_style="magenta"
     ))
 
@@ -251,24 +252,16 @@ def agent(target, provider, model, api_base, api_key, config, output):
     Path(output).mkdir(parents=True, exist_ok=True)
     os.chdir(output)
 
-    from llm.agent import run_agent_scan
-    result = run_agent_scan(target, model_cfg, console)
+    from llm.agent import run_merged_agent
+    result = run_merged_agent(target, model_cfg, console)
 
     if result["status"] == "success":
-        console.print(f"\n[green]Agent completed successfully![/]")
         report = result.get("report", {})
         vulns = report.get("vulnerabilities", [])
         summary = report.get("vulnerability_summary", {})
-        console.print(f"\nVulnerabilities found: {summary.get('total', len(vulns))}")
-        console.print(f"  Critical: {summary.get('critical', 0)}")
-        console.print(f"  High: {summary.get('high', 0)}")
-        console.print(f"  Medium: {summary.get('medium', 0)}")
-        console.print(f"  Low: {summary.get('low', 0)}")
+        console.print(f"\n[bold green]Done![/] Found {summary.get('total', len(vulns))} vulnerabilities.")
     else:
-        console.print(f"\n[yellow]Agent completed but no report file found.[/]")
-        console.print(f"[dim]{result.get('message', result.get('error', ''))}[/]")
-
-    console.print(f"\n[green]Check {output}/ for report files.[/]")
+        console.print(f"\n[yellow]Agent completed. {result.get('message', result.get('error', ''))}[/]")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ---
 name: 01-recon
-description: "Analyze initial reconnaissance data (DNS, SSL, headers, WHOIS) for a target website and identify the technology stack, potential attack surface, and notable misconfigurations"
+description: "Comprehensive reconnaissance: DNS, SSL, HTTP headers, WAF detection, CDN, CORS, tech stack, rate limiting, cloud storage"
 license: MIT
 metadata:
   step: 1
@@ -10,51 +10,47 @@ metadata:
 # Skill: Reconnaissance Analysis
 
 ## Input
-
-A JSON object containing:
-- `target`: The target domain or URL
-- `dns`: DNS records (A, MX, TXT, CNAME, NS)
-- `ssl`: SSL certificate details (issuer, validity, SAN entries)
-- `headers`: HTTP response headers from the target
-- `whois`: WHOIS registration data
+JSON with: target, dns, ssl, headers, whois
 
 ## Task
-
-Analyze the reconnaissance data and produce an attack surface assessment:
-
-1. Identify all technologies and versions from headers, SSL, and DNS
-2. Flag any outdated or vulnerable software versions
-3. Check SSL configuration for weaknesses (expired, self-signed, weak cipher)
-4. Identify security headers that are missing (CSP, HSTS, X-Frame-Options, etc.)
-5. Note any DNS misconfigurations (open SPF, missing DMARC, dangling CNAME)
-6. Summarize the attack surface in plain language
+1. Identify ALL technologies and versions from headers, SSL, DNS, cookies
+2. Detect WAF/CDN (Cloudflare, AWS WAF, Akamai, Sucuri, Imperva)
+3. Check security headers: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy
+4. Analyze SSL: expiry, self-signed, weak cipher, protocol version, SAN mismatches
+5. DNS health: SPF, DMARC, DKIM, dangling CNAME, open DNS recursion
+6. Detect CORS configuration: Access-Control-Allow-Origin: * with credentials
+7. Identify rate limiting: X-RateLimit headers, Retry-After
+8. Check for cloud storage: S3 buckets, Azure blobs, GCP storage referenced in JS
+9. Analyze cookies: HttpOnly, Secure, SameSite flags
+10. Detect framework-specific leaks: X-Powered-By, X-AspNet-Version
 
 ## Output Format
-
-Return a JSON object with this exact structure:
-
 ```json
 {
-  "technologies": [
-    {"name": "nginx", "version": "1.24.0", "category": "web-server"}
-  ],
+  "technologies": [{"name": "nginx", "version": "1.24.0", "category": "web-server"}],
+  "waf_detected": {"name": "Cloudflare", "evidence": "cf-ray header"},
+  "cdn_detected": {"name": "CloudFront", "evidence": "x-amz-cf-id header"},
   "security_headers": {
     "present": ["X-Content-Type-Options"],
     "missing": ["Content-Security-Policy", "Strict-Transport-Security"],
     "weak": ["X-Frame-Options: ALLOW-FROM *"]
   },
   "ssl_issues": ["Certificate expires in 10 days"],
-  "dns_issues": ["No DMARC record found"],
-  "attack_surface_summary": "The target runs nginx 1.24.0 with PHP 8.2. Missing CSP and HSTS headers increase exposure to XSS and MITM attacks. SSL certificate is valid but expires soon.",
-  "recommendations": ["Add Content-Security-Policy header", "Enable HSTS", "Set up DMARC record"]
+  "dns_issues": ["No DMARC record", "SPF too permissive (~all)"],
+  "cors_issues": ["ACAO: * with ACAC: true — credential leak risk"],
+  "cookie_issues": ["PHPSESSID missing HttpOnly flag"],
+  "rate_limiting": {"detected": false},
+  "cloud_storage": ["https://s3.amazonaws.com/target-backups"],
+  "attack_surface_summary": "Specific summary of attack surface",
+  "recommendations": ["Specific actionable recommendations"]
 }
 ```
 
 ## Success Criteria
-
-- All technologies from headers and SSL must be identified
-- All missing security headers from OWASP secure headers project must be flagged
-- SSL issues must include expiry within 30 days, self-signed, or weak algorithms
-- DNS issues must check for SPF, DMARC, and dangling CNAME records
-- Attack surface summary must be specific to the target (not generic)
-- Output must be valid JSON matching the schema above
+- All technologies from headers AND SSL must be identified
+- WAF/CDN detection must check for common providers
+- All missing OWASP secure headers must be flagged
+- CORS misconfiguration must be flagged if ACAO:* with credentials
+- Cookie security flags must be checked
+- Cloud storage references must be noted if found
+- Output must be valid JSON
