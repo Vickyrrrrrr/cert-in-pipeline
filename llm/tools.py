@@ -9,6 +9,7 @@ import subprocess
 import shutil
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from agents import function_tool
@@ -23,9 +24,24 @@ YELLOW = "\033[33m"
 MAGENTA = "\033[35m"
 RESET = "\033[0m"
 
+# Global flag — set to False while tool is running, True when LLM is thinking
+# This lets the heartbeat spinner in agent.py know when to show/hide
+_thinking = True
+
+
+def _set_thinking(val):
+    """Update the thinking flag."""
+    global _thinking
+    _thinking = val
+
 
 def _tool_call(name, **kwargs):
     """Print compact tool call like Claude Code: ● run_nuclei(target="...")"""
+    global _thinking
+    _thinking = False  # Stop spinner
+    # Clear the spinner line
+    sys.stdout.write("\r" + " " * 60 + "\r")
+    sys.stdout.flush()
     args = ", ".join(f'{k}="{v}"' if isinstance(v, str) else f'{k}={v}' for k, v in kwargs.items())
     if len(args) > 80:
         args = args[:77] + "..."
@@ -34,6 +50,8 @@ def _tool_call(name, **kwargs):
 
 def _tool_result(msg, status="ok"):
     """Print compact result: ○ Found 5 vulnerabilities"""
+    global _thinking
+    _thinking = True  # Resume spinner for LLM thinking
     icon = GREEN + "○" + RESET if status == "ok" else RED + "✗" + RESET if status == "error" else YELLOW + "○" + RESET
     print(f"  {icon} {msg}", flush=True)
 

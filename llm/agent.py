@@ -6,6 +6,9 @@ per the skill's success criteria. Like Claude Code but for security scanning.
 
 import json
 import os
+import sys
+import time
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -27,6 +30,25 @@ MAGENTA = "\033[35m"
 RESET = "\033[0m"
 
 SKILLS_DIR = Path(__file__).parent.parent / "skills"
+
+# Global flag — tools set this to False while running, True when LLM is thinking
+_thinking = True
+
+
+def _heartbeat(stop_event):
+    """Print a heartbeat every 5 seconds while LLM is thinking."""
+    import llm.tools as tools_mod
+    spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    i = 0
+    start = time.time()
+    while not stop_event.wait(0.1):
+        if tools_mod._thinking:
+            elapsed = int(time.time() - start)
+            sys.stdout.write(f"\r  {DIM}{spinner[i % len(spinner)]} Thinking... ({elapsed}s){RESET}    ")
+            sys.stdout.flush()
+            i += 1
+    sys.stdout.write("\r" + " " * 60 + "\r")
+    sys.stdout.flush()
 
 
 def _load_skill(name: str) -> str:
@@ -209,8 +231,19 @@ Then STOP. Do not call any more tools after writing the report.
 
     session.log("agent_start", {"target": target, "model": model_config["name"]})
 
+    # Start heartbeat spinner in background thread
+    import llm.tools as tools_mod
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(target=_heartbeat, args=(heartbeat_stop,), daemon=True)
+    heartbeat_thread.start()
+
     try:
         result = Runner.run_sync(agent, prompt, max_turns=25)
+
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1)
+        sys.stdout.write("\r" + " " * 60 + "\r")
+        sys.stdout.flush()
 
         session.log("agent_end", {"status": "completed"})
         summary = session.summary()
@@ -252,6 +285,8 @@ Then STOP. Do not call any more tools after writing the report.
         return {"status": "completed", "report": None, "session": summary}
 
     except Exception as e:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1)
         session.log("agent_error", {"error": str(e)})
         print(f"\n{RED}{BOLD}Error:{RESET} {e}", flush=True)
         print(f"{GREEN}Session:{RESET} {session.session_file}", flush=True)
