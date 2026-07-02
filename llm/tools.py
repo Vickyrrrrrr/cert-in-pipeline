@@ -238,7 +238,9 @@ def run_httpx(target):
         _tool_result("httpx not installed", "error")
         return json.dumps({"error": "not installed", "results": []})
     _tool_running("probing HTTP service")
-    cmd = [httpx_path, "-u", url, "-json", "-silent", "-status-code", "-title", "-tech-detect", "-follow-redirects"]
+    cmd = [httpx_path, "-u", url, "-json", "-silent", "-status-code", "-title", "-tech-detect",
+           "-follow-redirects", "-timeout", "15",
+           "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"]
     try:
         result = subprocess.run(cmd, timeout=60, **SUBPROCESS_KWARGS)
         results = []
@@ -319,7 +321,9 @@ def run_curl(url, method="GET", headers=""):
         _tool_result("curl not installed", "error")
         return "curl not installed"
     _tool_running("sending HTTP request")
-    cmd = [curl_path, "-s", "-i", "-X", method, "--max-time", "30", "-L", "-k", url]
+    cmd = [curl_path, "-s", "-i", "-X", method, "--max-time", "30", "-L", "-k",
+           "-A", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+           url]
     if headers:
         for h in headers.split(","):
             h = h.strip()

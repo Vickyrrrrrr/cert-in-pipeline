@@ -227,7 +227,14 @@ Then STOP. Do not call any more tools after writing the report.
         report_path = Path("results") / "cert-in-report.json"
         if report_path.exists():
             with open(report_path, "r", encoding="utf-8") as f:
-                report = json.load(f)
+                raw = f.read()
+            # Fix common invalid JSON escapes from LLM (e.g. \$ -> $)
+            import re
+            raw = re.sub(r'\\([^"\\/bfnrtu])', r'\1', raw)
+            try:
+                report = json.loads(raw)
+            except json.JSONDecodeError:
+                report = {"raw_report": raw, "parse_error": "Could not parse JSON"}
 
             vuln_summary = report.get("vulnerability_summary", {})
             vulns = report.get("vulnerabilities", [])
