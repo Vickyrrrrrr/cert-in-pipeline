@@ -34,6 +34,18 @@ from agents import Agent, Runner, set_tracing_disabled
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 
+# AgentOutputSchema with strict_json_schema=False — needed because our Pydantic
+# models use list[dict] which isn't valid for strict JSON schema mode.
+try:
+    from agents import AgentOutputSchema
+    def _output_type(model_class, structured: bool):
+        if not structured:
+            return {}
+        return {"output_type": AgentOutputSchema(model_class, strict_json_schema=False)}
+except ImportError:
+    def _output_type(model_class, structured: bool):
+        return {"output_type": model_class} if structured else {}
+
 from llm.tools import EXPANDED_TOOLS, set_quiet
 from llm.schemas import (
     ReconOutput, EnumOutput, VulnOutput, VerifiedFinding,
@@ -324,26 +336,26 @@ def _create_agents(model_config: dict, provider_name: str = ""):
     recon_agent = Agent(
         name="Recon", instructions=RECON_PROMPT, model=model,
         tools=recon_tools,
-        **({"output_type": ReconOutput} if structured else {}),
+        **_output_type(ReconOutput, structured),
     )
     enum_agent = Agent(
         name="Enum", instructions=ENUM_PROMPT, model=model,
         tools=enum_tools,
-        **({"output_type": EnumOutput} if structured else {}),
+        **_output_type(EnumOutput, structured),
     )
     vuln_agent = Agent(
         name="VulnScan", instructions=VULN_PROMPT, model=model,
         tools=vuln_tools,
-        **({"output_type": VulnOutput} if structured else {}),
+        **_output_type(VulnOutput, structured),
     )
     verify_agent = Agent(
         name="Verifier", instructions=VERIFY_PROMPT, model=model,
         tools=verify_tools,
-        **({"output_type": VerifiedFinding} if structured else {}),
+        **_output_type(VerifiedFinding, structured),
     )
     reporter_agent = Agent(
         name="Reporter", instructions=REPORTER_PROMPT, model=model,
-        **({"output_type": ScanReport} if structured else {}),
+        **_output_type(ScanReport, structured),
     )
     return recon_agent, enum_agent, vuln_agent, verify_agent, reporter_agent
 
