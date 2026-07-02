@@ -145,7 +145,9 @@ def _agent_activity(agent: str, tool: str, result: str, status: str = "ok"):
 def _phase_done(title: str, elapsed: float, extra: str = ""):
     """Print phase completion."""
     extra_str = f" {DIM}{DOT}{RESET} {extra}" if extra else ""
-    print(f"  {GREEN}{CHECK}{RESET} {title} {DIM}{TIMER} {elapsed:.1f}s{RESET}{extra_str}", flush=True)
+    failed = "failed" in extra or "no results" in extra
+    icon = f"{RED}{CROSS}{RESET}" if failed else f"{GREEN}{CHECK}{RESET}"
+    print(f"  {icon} {title} {DIM}{TIMER} {elapsed:.1f}s{RESET}{extra_str}", flush=True)
 
 
 def _phase_fail(title: str, elapsed: float, error: str):

@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-Severity = Literal["critical", "high", "medium", "low", "info"]
+Severity = Literal["critical", "high", "medium", "moderate", "low", "info", "informational", "none"]
 
 
 class Finding(BaseModel):
