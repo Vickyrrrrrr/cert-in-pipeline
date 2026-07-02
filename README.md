@@ -31,6 +31,22 @@ chmod +x scripts/install.sh && ./scripts/install.sh
 
 After install, **restart your terminal** to pick up new PATH entries.
 
+### Docker vs Local — which to use?
+
+**No hosting needed.** Docker runs locally on your machine as a disposable sandbox.
+
+| | Local (without Docker) | Docker (sandboxed) |
+|--|------------------------|---------------------|
+| Setup | `.\scripts\install.ps1` | `docker build -t cert-in-pipeline .` |
+| Tools | Installed on your machine | Inside the container |
+| Speed | Faster | Slight overhead |
+| Isolation | None — tools run on your system | Full sandbox — your system untouched |
+| Best for | Quick testing | Production scans |
+
+**Start with Local** (simpler). Use Docker when you want isolation.
+
+---
+
 ### 2. Set your API key
 
 Each provider reads its key from a specific environment variable:
