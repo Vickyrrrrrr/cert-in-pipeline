@@ -751,7 +751,7 @@ Output ScanReport.
         vulns = report_out.vulnerabilities
         summary = report_out.vulnerability_summary
 
-        summary_lines.append(f"findings {DOT}  {summary.get('critical', 0)} critical, {summary.get('high', 0)} high, {summary.get('medium', 0)} medium, {summary.get('low', 0)} low")
+        summary_lines.append(f"findings {DOT}  {summary.critical} critical, {summary.high} high, {summary.medium} medium, {summary.low} low")
         summary_lines.append(f"verified {DOT}  {len(verified_findings)} of {len(all_findings)} passed verification")
         summary_lines.append(f"evidence {DOT}  {ev_summary['total_evidence']} items stored in SQLite")
         summary_lines.append(f"report   {DOT}  results/cert-in-report.json")
